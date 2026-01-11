@@ -2,10 +2,14 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QThreadPool>
 #include "robotstatusthread.h"
 #include "navstatusthread.h"
 #include "systemmonitorthread.h"
 #include "logthread.h"
+#include "logtablemodel.h"
+#include "logfilterproxymodel.h"
+#include "logquerytask.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -18,6 +22,14 @@ class MainWindow : public QMainWindow
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+
+    void queryLogsAsync(const QDateTime& startTime = QDateTime(),
+                       const QDateTime& endTime = QDateTime(),
+                       int minLevel = -1,
+                       const QString& source = QString(),
+                       const QString& keyword = QString(),
+                       int limit = -1,
+                       int offset = 0);
 
 private slots:
     // RobotStatusThread槽函数
@@ -47,6 +59,16 @@ private slots:
     void onThreadStopped(const QString& threadName);
     void onThreadError(const QString& error);
 
+    // 日志查询槽函数
+    void onQueryCompleted(const QVector<StorageLogEntry>& results);
+    void onQueryFailed(const QString& error);
+
+    // 日志过滤槽函数
+    void onFilterChanged();
+    void onQueryButtonClicked();
+    void onClearFilterButtonClicked();
+    void onRefreshButtonClicked();
+
 private:
     void initializeThreads();
     void connectSignals();
@@ -60,6 +82,9 @@ private:
     NavStatusThread* m_navStatusThread;
     SystemMonitorThread* m_systemMonitorThread;
     LogThread* m_logThread;
+    LogTableModel* m_logTableModel;
+    LogFilterProxyModel* m_logFilterProxyModel;
+    QThreadPool* m_threadPool;
 };
 
 #endif // MAINWINDOW_H

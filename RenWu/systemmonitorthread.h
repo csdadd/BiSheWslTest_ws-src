@@ -4,6 +4,7 @@
 #include "basethread.h"
 #include "roscontextmanager.h"
 #include "threadsafequeue.h"
+#include "logstorageengine.h"
 #include <rclcpp/rclcpp.hpp>
 #include <rcl_interfaces/msg/log.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
@@ -66,10 +67,12 @@ private:
     rclcpp::executors::SingleThreadedExecutor::SharedPtr m_executor;
 
     rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr m_rosoutSub;
+    rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr m_rosoutAggSub;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr m_collisionSub;
     rclcpp::Subscription<nav2_msgs::msg::BehaviorTreeLog>::SharedPtr m_behaviorTreeSub;
 
     ThreadSafeQueue<MonitorLogEntry> m_logQueue;
+    LogStorageEngine* m_storageEngine;
 };
 
 #endif // SYSTEMMONITORTHREAD_H

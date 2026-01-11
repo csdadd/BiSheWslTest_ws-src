@@ -2,6 +2,8 @@
 #include "./ui_mainwindow.h"
 #include <QMessageBox>
 #include <QDebug>
+#include <QDateTime>
+#include <algorithm>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -10,8 +12,26 @@ MainWindow::MainWindow(QWidget *parent)
     , m_navStatusThread(nullptr)
     , m_systemMonitorThread(nullptr)
     , m_logThread(nullptr)
+    , m_logTableModel(nullptr)
+    , m_logFilterProxyModel(nullptr)
 {
     ui->setupUi(this);
+
+    m_logTableModel = new LogTableModel(this);
+    m_logFilterProxyModel = new LogFilterProxyModel(this);
+    m_logFilterProxyModel->setSourceModel(m_logTableModel);
+    ui->logTableView->setModel(m_logFilterProxyModel);
+
+    ui->logTableView->setColumnWidth(0, 180);
+    ui->logTableView->setColumnWidth(1, 80);
+    ui->logTableView->setColumnWidth(2, 120);
+    ui->logTableView->horizontalHeader()->setStretchLastSection(true);
+
+    m_threadPool = new QThreadPool(this);
+    m_threadPool->setMaxThreadCount(2);
+
+    ui->startTimeEdit->setDateTime(QDateTime::currentDateTime().addDays(-1));
+    ui->endTimeEdit->setDateTime(QDateTime::currentDateTime());
 
     initializeThreads();
     connectSignals();
@@ -35,6 +55,8 @@ void MainWindow::initializeThreads()
     m_navStatusThread = new NavStatusThread(this);
     m_systemMonitorThread = new SystemMonitorThread(this);
     m_logThread = new LogThread(this);
+
+    m_logTableModel->setStorageEngine(m_logThread->getStorageEngine());
 }
 
 void MainWindow::connectSignals()
@@ -87,6 +109,13 @@ void MainWindow::connectSignals()
     connect(m_systemMonitorThread, &SystemMonitorThread::logMessage,
             m_logThread, &LogThread::writeLog);
 
+    // SystemMonitorThread日志接收后转发给LogThread
+    connect(m_systemMonitorThread, &SystemMonitorThread::logMessageReceived,
+            m_logThread, [this](const QString& message, int level, const QDateTime& timestamp) {
+        LogEntry entry(message, level, timestamp, "SystemMonitor", "ROS");
+        m_logThread->writeLogEntry(entry);
+    });
+
     // RobotStatusThread的诊断信息转发给SystemMonitorThread
     connect(m_robotStatusThread, &RobotStatusThread::diagnosticsReceived,
             m_systemMonitorThread, &SystemMonitorThread::onDiagnosticsReceived);
@@ -123,6 +152,22 @@ void MainWindow::connectSignals()
             this, &MainWindow::onThreadStopped);
     connect(m_logThread, &LogThread::threadError,
             this, &MainWindow::onThreadError);
+
+    // 连接过滤控件信号
+    connect(ui->debugCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->infoCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->warningCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->errorCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->fatalCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->keywordLineEdit, &QLineEdit::textChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->sourceLineEdit, &QLineEdit::textChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->startTimeEdit, &QDateTimeEdit::dateTimeChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->endTimeEdit, &QDateTimeEdit::dateTimeChanged, this, &MainWindow::onFilterChanged);
+
+    // 连接按钮信号
+    connect(ui->queryButton, &QPushButton::clicked, this, &MainWindow::onQueryButtonClicked);
+    connect(ui->clearFilterButton, &QPushButton::clicked, this, &MainWindow::onClearFilterButtonClicked);
+    connect(ui->refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshButtonClicked);
 }
 
 void MainWindow::startAllThreads()
@@ -168,93 +213,276 @@ void MainWindow::stopAllThreads()
 
 void MainWindow::onBatteryStatusReceived(float voltage, float percentage)
 {
-    qDebug() << "Battery:" << voltage << "V," << percentage << "%";
+    QString message = QString("电池状态 - 电压: %1 V, 电量: %2%").arg(voltage, 0, 'f', 2).arg(percentage, 0, 'f', 1);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Battery");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onPositionReceived(double x, double y, double yaw)
 {
-    qDebug() << "Position:" << x << y << yaw;
+    QString message = QString("位置信息 - X: %1, Y: %2, Yaw: %3").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Position");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, double vy, double omega)
 {
-    qDebug() << "Odometry:" << x << y << yaw << vx << vy << omega;
+    QString message = QString("里程计 - 位置(X:%1, Y:%2, Yaw:%3), 速度(vx:%4, vy:%5, omega:%6)")
+        .arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2)
+        .arg(vx, 0, 'f', 2).arg(vy, 0, 'f', 2).arg(omega, 0, 'f', 2);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Odometry");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onSystemTimeReceived(const QString& time)
 {
-    qDebug() << "System Time:" << time;
+    ui->statusbar->showMessage(QString("系统时间: %1").arg(time));
 }
 
 void MainWindow::onDiagnosticsReceived(const QString& status, int level, const QString& message)
 {
-    qDebug() << "Diagnostics:" << status << "level:" << level << message;
+    int logLevel = LOG_INFO;
+    if (level == 1) logLevel = LOG_WARNING;
+    else if (level == 2) logLevel = LOG_ERROR;
+    else if (level == 3) logLevel = LOG_FATAL;
+    else if (level == 4) logLevel = LOG_DEBUG;
+
+    QString logMessage = QString("诊断信息 - 状态: %1, 消息: %2").arg(status).arg(message);
+    LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "RobotStatus", "Diagnostics");
+    m_logTableModel->addLogEntry(entry);
+
+    if (level >= 2) {
+        ui->statusbar->showMessage(QString("诊断警告: %1").arg(message), 5000);
+    }
 }
 
 // ==================== NavStatusThread槽函数 ====================
 
 void MainWindow::onNavigationStatusReceived(int status, const QString& message)
 {
-    qDebug() << "Navigation Status:" << status << message;
+    QString statusStr;
+    switch (status) {
+        case 0: statusStr = "空闲"; break;
+        case 1: statusStr = "规划中"; break;
+        case 2: statusStr = "执行中"; break;
+        case 3: statusStr = "完成"; break;
+        case 4: statusStr = "失败"; break;
+        default: statusStr = QString::number(status); break;
+    }
+
+    QString logMessage = QString("导航状态 - %1: %2").arg(statusStr).arg(message);
+    LogEntry entry(logMessage, LOG_INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
+    m_logTableModel->addLogEntry(entry);
+
+    ui->statusbar->showMessage(QString("导航: %1 - %2").arg(statusStr).arg(message), 3000);
 }
 
 void MainWindow::onNavigationFeedbackReceived(const QString& feedback)
 {
-    qDebug() << "Navigation Feedback:" << feedback;
+    QString message = QString("导航反馈 - %1").arg(feedback);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onNavigationPathReceived(const QVector<QPointF>& path)
 {
-    qDebug() << "Navigation Path:" << path.size() << "points";
+    QString message = QString("导航路径 - 路径点数: %1").arg(path.size());
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
+    m_logTableModel->addLogEntry(entry);
 }
 
 // ==================== SystemMonitorThread槽函数 ====================
 
 void MainWindow::onLogMessageReceived(const QString& message, int level, const QDateTime& timestamp)
 {
-    qDebug() << "Log:" << timestamp.toString() << message;
+    LogEntry entry(message, level, timestamp, "SystemMonitor", "ROS");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onCollisionDetected(const QString& message)
 {
-    qDebug() << "Collision:" << message;
+    QString logMessage = QString("碰撞检测 - %1").arg(message);
+    LogEntry entry(logMessage, LOG_ERROR, QDateTime::currentDateTime(), "SystemMonitor", "Collision");
+    m_logTableModel->addLogEntry(entry);
+
+    ui->statusbar->showMessage(QString("警告: %1").arg(message), 5000);
 }
 
 void MainWindow::onAnomalyDetected(const QString& message)
 {
-    qDebug() << "Anomaly:" << message;
+    QString logMessage = QString("异常检测 - %1").arg(message);
+    LogEntry entry(logMessage, LOG_WARNING, QDateTime::currentDateTime(), "SystemMonitor", "Anomaly");
+    m_logTableModel->addLogEntry(entry);
+
+    ui->statusbar->showMessage(QString("异常: %1").arg(message), 5000);
 }
 
 void MainWindow::onBehaviorTreeLogReceived(const QString& log)
 {
-    qDebug() << "Behavior Tree:" << log;
+    QString message = QString("行为树日志 - %1").arg(log);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "SystemMonitor", "BehaviorTree");
+    m_logTableModel->addLogEntry(entry);
 }
 
 // ==================== LogThread槽函数 ====================
 
 void MainWindow::onLogFileChanged(const QString& filePath)
 {
-    qDebug() << "Log File:" << filePath;
+    QString message = QString("日志文件变更 - 新文件: %1").arg(filePath);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "LogThread", "File");
+    m_logTableModel->addLogEntry(entry);
 }
 
 // ==================== 线程状态槽函数 ====================
 
 void MainWindow::onConnectionStateChanged(bool connected)
 {
-    qDebug() << "Connection State:" << (connected ? "Connected" : "Disconnected");
+    QString status = connected ? "已连接" : "已断开";
+    ui->statusbar->showMessage(QString("ROS连接状态: %1").arg(status), 3000);
+
+    QString message = QString("连接状态变更 - %1").arg(status);
+    LogEntry entry(message, connected ? LOG_INFO : LOG_WARNING, QDateTime::currentDateTime(), "System", "Connection");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onThreadStarted(const QString& threadName)
 {
-    qDebug() << "Thread started:" << threadName;
+    QString message = QString("线程启动 - %1").arg(threadName);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onThreadStopped(const QString& threadName)
 {
-    qDebug() << "Thread stopped:" << threadName;
+    QString message = QString("线程停止 - %1").arg(threadName);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onThreadError(const QString& error)
 {
-    qDebug() << "Thread error:" << error;
+    QString message = QString("线程错误 - %1").arg(error);
+    LogEntry entry(message, LOG_ERROR, QDateTime::currentDateTime(), "System", "Thread");
+    m_logTableModel->addLogEntry(entry);
+
+    ui->statusbar->showMessage(QString("错误: %1").arg(error), 5000);
+}
+
+// ==================== 日志查询方法 ====================
+
+void MainWindow::queryLogsAsync(const QDateTime& startTime,
+                               const QDateTime& endTime,
+                               int minLevel,
+                               const QString& source,
+                               const QString& keyword,
+                               int limit,
+                               int offset)
+{
+    if (!m_logThread || !m_logThread->getStorageEngine()) {
+        qWarning() << "[MainWindow] LogThread or StorageEngine is null";
+        return;
+    }
+
+    LogStorageEngine* engine = m_logThread->getStorageEngine();
+    if (!engine->isInitialized()) {
+        qWarning() << "[MainWindow] StorageEngine is not initialized";
+        return;
+    }
+
+    LogQueryTask* task = new LogQueryTask(engine, startTime, endTime, minLevel, source, keyword, limit, offset);
+
+    connect(task, &LogQueryTask::queryCompleted, this, &MainWindow::onQueryCompleted, Qt::QueuedConnection);
+    connect(task, &LogQueryTask::queryFailed, this, &MainWindow::onQueryFailed, Qt::QueuedConnection);
+
+    m_threadPool->start(task);
+
+    qDebug() << "[MainWindow] Async query started";
+}
+
+void MainWindow::onQueryCompleted(const QVector<StorageLogEntry>& results)
+{
+    qDebug() << "[MainWindow] Query completed, received" << results.size() << "logs";
+
+    QVector<LogEntry> entries;
+    entries.reserve(results.size());
+
+    for (const auto& storageEntry : results) {
+        LogEntry entry;
+        entry.message = storageEntry.message;
+        entry.level = storageEntry.level;
+        entry.timestamp = storageEntry.timestamp;
+        entry.source = storageEntry.source;
+        entry.category = storageEntry.category;
+        entries.append(entry);
+    }
+
+    m_logTableModel->clearLogs();
+    m_logTableModel->addLogEntries(entries);
+
+    ui->statusbar->showMessage(QString("查询完成: 找到 %1 条日志").arg(results.size()), 3000);
+}
+
+void MainWindow::onQueryFailed(const QString& error)
+{
+    qWarning() << "[MainWindow] Query failed:" << error;
+
+    QString message = QString("查询失败 - %1").arg(error);
+    LogEntry entry(message, LOG_ERROR, QDateTime::currentDateTime(), "MainWindow", "Query");
+    m_logTableModel->addLogEntry(entry);
+
+    ui->statusbar->showMessage(QString("查询失败: %1").arg(error), 5000);
+}
+
+void MainWindow::onFilterChanged()
+{
+    QSet<int> levels;
+    if (ui->debugCheckBox->isChecked()) levels.insert(LOG_DEBUG);
+    if (ui->infoCheckBox->isChecked()) levels.insert(LOG_INFO);
+    if (ui->warningCheckBox->isChecked()) levels.insert(LOG_WARNING);
+    if (ui->errorCheckBox->isChecked()) levels.insert(LOG_ERROR);
+    if (ui->fatalCheckBox->isChecked()) levels.insert(LOG_FATAL);
+
+    m_logFilterProxyModel->setLogLevelFilter(levels);
+    m_logFilterProxyModel->setKeywordFilter(ui->keywordLineEdit->text());
+    m_logFilterProxyModel->setSourceFilter(ui->sourceLineEdit->text());
+    m_logFilterProxyModel->setTimeRangeFilter(ui->startTimeEdit->dateTime(), ui->endTimeEdit->dateTime());
+}
+
+void MainWindow::onQueryButtonClicked()
+{
+    QDateTime startTime = ui->startTimeEdit->dateTime();
+    QDateTime endTime = ui->endTimeEdit->dateTime();
+
+    QSet<int> levels;
+    if (ui->debugCheckBox->isChecked()) levels.insert(LOG_DEBUG);
+    if (ui->infoCheckBox->isChecked()) levels.insert(LOG_INFO);
+    if (ui->warningCheckBox->isChecked()) levels.insert(LOG_WARNING);
+    if (ui->errorCheckBox->isChecked()) levels.insert(LOG_ERROR);
+    if (ui->fatalCheckBox->isChecked()) levels.insert(LOG_FATAL);
+
+    int minLevel = levels.isEmpty() ? -1 : *std::min_element(levels.begin(), levels.end());
+    QString source = ui->sourceLineEdit->text();
+    QString keyword = ui->keywordLineEdit->text();
+
+    queryLogsAsync(startTime, endTime, minLevel, source, keyword);
+}
+
+void MainWindow::onClearFilterButtonClicked()
+{
+    ui->debugCheckBox->setChecked(false);
+    ui->infoCheckBox->setChecked(false);
+    ui->warningCheckBox->setChecked(false);
+    ui->errorCheckBox->setChecked(false);
+    ui->fatalCheckBox->setChecked(false);
+    ui->keywordLineEdit->clear();
+    ui->sourceLineEdit->clear();
+    ui->startTimeEdit->setDateTime(QDateTime::currentDateTime().addDays(-1));
+    ui->endTimeEdit->setDateTime(QDateTime::currentDateTime());
+
+    m_logFilterProxyModel->clearAllFilters();
+}
+
+void MainWindow::onRefreshButtonClicked()
+{
+    queryLogsAsync(QDateTime(), QDateTime(), -1, QString(), QString());
 }

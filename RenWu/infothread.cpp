@@ -1,6 +1,9 @@
 #include "infothread.h"
+#include "roscontextmanager.h"
 #include <cmath>
 #include <QtConcurrent>
+#include <QDebug>
+#include <thread>
 
 InfoThread::InfoThread(QObject* parent)
     : BaseThread(parent)
@@ -17,7 +20,7 @@ InfoThread::~InfoThread()
 void InfoThread::initialize()
 {
     try {
-        rclcpp::init(0, nullptr);
+        ROSContextManager::instance().initialize();
 
         m_rosNode = std::make_shared<rclcpp::Node>("info_thread_node");
         m_executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
@@ -25,6 +28,7 @@ void InfoThread::initialize()
         subscribeROSTopics();
 
         m_executor->add_node(m_rosNode);
+        setExecutor(m_executor);
 
         m_startTime = QDateTime::currentDateTime();
 
@@ -37,6 +41,8 @@ void InfoThread::initialize()
         throw;
     }
 }
+
+
 
 void InfoThread::subscribeROSTopics()
 {
@@ -107,9 +113,7 @@ void InfoThread::subscribeROSTopics()
 
 void InfoThread::process()
 {
-    if (m_executor && m_rosNode) {
-        m_executor->spin_some();
-    }
+    qDebug() << "[InfoThread] 正在运行 - 处理ROS话题订阅";
 
     QString currentTime = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
     emit systemTimeReceived(currentTime);

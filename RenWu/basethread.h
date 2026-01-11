@@ -5,6 +5,9 @@
 #include <QThread>
 #include <atomic>
 #include <QString>
+#include <memory>
+#include <thread>
+#include <rclcpp/executors.hpp>
 
 class BaseThread : public QThread
 {
@@ -33,6 +36,12 @@ protected:
     std::atomic<bool> m_running;
     std::atomic<bool> m_stopped;
     QString m_threadName;
+    std::shared_ptr<rclcpp::Executor> m_executor;
+
+public:
+    void setExecutor(const std::shared_ptr<rclcpp::Executor>& executor) {
+        m_executor = executor;
+    }
 };
 
 #endif // BASETHREAD_H

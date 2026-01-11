@@ -1,5 +1,6 @@
 #include "robotstatusthread.h"
 #include <cmath>
+#include <QDebug>
 
 RobotStatusThread::RobotStatusThread(QObject* parent)
     : BaseThread(parent)
@@ -79,6 +80,7 @@ void RobotStatusThread::subscribeROSTopics()
 
 void RobotStatusThread::process()
 {
+    qDebug() << "[RobotStatusThread] 正在运行 - 获取电池、位置、里程计和诊断信息";
     if (m_executor && m_rosNode) {
         m_executor->spin_some();
     }

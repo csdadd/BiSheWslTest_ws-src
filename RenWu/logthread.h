@@ -3,6 +3,7 @@
 
 #include "basethread.h"
 #include "threadsafequeue.h"
+#include "logstorageengine.h"
 #include <QFile>
 #include <QTextStream>
 #include <QDateTime>
@@ -39,6 +40,8 @@ public:
     void setLogFilePath(const QString& path);
     QString getLogFilePath() const;
 
+    LogStorageEngine* getStorageEngine() const;
+
 public slots:
     void writeLog(const QString& message, int level);
     void writeLogEntry(const LogEntry& entry);
@@ -68,6 +71,7 @@ private:
     qint64 m_maxFileSize;
     int m_maxFileCount;
     QMutex m_fileMutex;
+    LogStorageEngine* m_storageEngine;
 
     static constexpr qint64 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024;
     static constexpr int DEFAULT_MAX_FILE_COUNT = 5;

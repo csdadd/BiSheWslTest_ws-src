@@ -1,6 +1,8 @@
 #include "systemmonitorthread.h"
 #include <QDir>
 #include <QCoreApplication>
+#include <QDebug>
+#include <thread>
 
 SystemMonitorThread::SystemMonitorThread(QObject* parent)
     : BaseThread(parent)
@@ -23,6 +25,13 @@ void SystemMonitorThread::initialize()
 
         subscribeROSTopics();
         m_executor->add_node(m_rosNode);
+        setExecutor(m_executor);
+
+        m_storageEngine = new LogStorageEngine(this);
+        QString dbPath = QCoreApplication::applicationDirPath() + "/logs/system_monitor.db";
+        if (!m_storageEngine->initialize(dbPath)) {
+            emit threadError(QString("Failed to initialize LogStorageEngine: %1").arg(m_storageEngine->getLastError()));
+        }
 
         emit logMessage("SystemMonitorThread initialized successfully", 0);
         emit connectionStateChanged(true);
@@ -34,10 +43,20 @@ void SystemMonitorThread::initialize()
     }
 }
 
+
+
 void SystemMonitorThread::subscribeROSTopics()
 {
     m_rosoutSub = m_rosNode->create_subscription<rcl_interfaces::msg::Log>(
         "/rosout",
+        rclcpp::SensorDataQoS(),
+        [this](const rcl_interfaces::msg::Log::SharedPtr msg) {
+            processROSLog(msg);
+        }
+    );
+
+    m_rosoutAggSub = m_rosNode->create_subscription<rcl_interfaces::msg::Log>(
+        "/rosout_agg",
         rclcpp::SensorDataQoS(),
         [this](const rcl_interfaces::msg::Log::SharedPtr msg) {
             processROSLog(msg);
@@ -63,8 +82,33 @@ void SystemMonitorThread::subscribeROSTopics()
 
 void SystemMonitorThread::process()
 {
-    if (m_executor && m_rosNode) {
-        m_executor->spin_some();
+    qDebug() << "[SystemMonitorThread] 正在运行 - 监控ROS日志、碰撞检测和行为树";
+
+    QVector<StorageLogEntry> batchEntries;
+    MonitorLogEntry entry;
+    
+    while (m_logQueue.tryDequeue(entry, 0)) {
+        emit logMessageReceived(entry.message, entry.level, entry.timestamp);
+        
+        StorageLogEntry storageEntry(
+            entry.message,
+            entry.level,
+            entry.timestamp,
+            entry.source,
+            entry.category
+        );
+        batchEntries.append(storageEntry);
+        
+        if (batchEntries.size() >= 100) {
+            if (m_storageEngine && m_storageEngine->isInitialized()) {
+                m_storageEngine->insertLogs(batchEntries);
+            }
+            batchEntries.clear();
+        }
+    }
+    
+    if (!batchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
+        m_storageEngine->insertLogs(batchEntries);
     }
 }
 

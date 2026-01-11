@@ -19,8 +19,8 @@ if(CMAKE_VERSION VERSION_LESS "3.16")
 endif()
 
 find_package(ament_cmake REQUIRED)
-find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets REQUIRED)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets Concurrent Sql REQUIRED)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Concurrent Sql)
 
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
@@ -52,8 +52,18 @@ set(PROJECT_SOURCES
         navstatusthread.cpp
         systemmonitorthread.h
         systemmonitorthread.cpp
+        infothread.h
+        infothread.cpp
         logthread.h
         logthread.cpp
+        logtablemodel.h
+        logtablemodel.cpp
+        logfilterproxymodel.h
+        logfilterproxymodel.cpp
+        logstorageengine.h
+        logstorageengine.cpp
+        logquerytask.h
+        logquerytask.cpp
         threadsafequeue.h
 )
 
@@ -63,6 +73,8 @@ add_executable(RenWu
 
 target_link_libraries(RenWu PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Concurrent
+    Qt${QT_VERSION_MAJOR}::Sql
 )
 
 ament_target_dependencies(RenWu PUBLIC

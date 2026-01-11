@@ -1,6 +1,7 @@
 #include "logthread.h"
 #include <QDir>
 #include <QCoreApplication>
+#include <QDebug>
 
 LogThread::LogThread(QObject* parent)
     : BaseThread(parent)
@@ -50,6 +51,12 @@ void LogThread::initialize()
             emit threadError(QString("Failed to open log file: %1").arg(m_logFilePath));
         }
 
+        m_storageEngine = new LogStorageEngine(this);
+        QString dbPath = m_logDirectory + "/app_logs.db";
+        if (!m_storageEngine->initialize(dbPath)) {
+            emit threadError(QString("Failed to initialize LogStorageEngine: %1").arg(m_storageEngine->getLastError()));
+        }
+
         emit logFileChanged(m_logFilePath);
         emit logMessage("LogThread initialized successfully", LOG_INFO);
 
@@ -61,6 +68,7 @@ void LogThread::initialize()
 
 void LogThread::process()
 {
+    qDebug() << "[LogThread] 正在运行 - 处理日志队列";
     processLogQueue();
 }
 
@@ -90,9 +98,31 @@ void LogThread::writeLogEntry(const LogEntry& entry)
 
 void LogThread::processLogQueue()
 {
+    QVector<StorageLogEntry> batchEntries;
     LogEntry entry;
+    
     while (m_logQueue.tryDequeue(entry, 0)) {
         writeToFile(entry.message, entry.level, entry.timestamp, entry.source);
+        
+        StorageLogEntry storageEntry(
+            entry.message,
+            entry.level,
+            entry.timestamp,
+            entry.source,
+            entry.category
+        );
+        batchEntries.append(storageEntry);
+        
+        if (batchEntries.size() >= 100) {
+            if (m_storageEngine && m_storageEngine->isInitialized()) {
+                m_storageEngine->insertLogs(batchEntries);
+            }
+            batchEntries.clear();
+        }
+    }
+    
+    if (!batchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
+        m_storageEngine->insertLogs(batchEntries);
     }
 }
 
@@ -169,4 +199,9 @@ QString LogThread::levelToString(int level)
         default:
             return "UNKNOWN";
     }
+}
+
+LogStorageEngine* LogThread::getStorageEngine() const
+{
+    return m_storageEngine;
 }

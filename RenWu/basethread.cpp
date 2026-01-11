@@ -1,4 +1,5 @@
 #include "basethread.h"
+#include <rclcpp/rclcpp.hpp>
 
 BaseThread::BaseThread(QObject* parent)
     : QThread(parent)
@@ -34,6 +35,15 @@ void BaseThread::run()
 
     try {
         initialize();
+
+        std::thread spinThread([this]() {
+            while (rclcpp::ok() && !m_stopped) {
+                if (m_executor) {
+                    m_executor->spin();
+                }
+            }
+        });
+        spinThread.detach();
 
         while (!m_stopped && !isInterruptionRequested()) {
             process();
