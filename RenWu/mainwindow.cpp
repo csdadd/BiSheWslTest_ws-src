@@ -3,7 +3,10 @@
 #include <QMessageBox>
 #include <QDebug>
 #include <QDateTime>
+#include <QFileDialog>
 #include <algorithm>
+#include "maploader.h"
+#include "mapconverter.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -14,6 +17,9 @@ MainWindow::MainWindow(QWidget *parent)
     , m_logThread(nullptr)
     , m_logTableModel(nullptr)
     , m_logFilterProxyModel(nullptr)
+    , m_mapThread(nullptr)
+    , m_mapWidget(nullptr)
+    , m_mapCache(nullptr)
 {
     ui->setupUi(this);
 
@@ -33,6 +39,11 @@ MainWindow::MainWindow(QWidget *parent)
     ui->startTimeEdit->setDateTime(QDateTime::currentDateTime().addDays(-1));
     ui->endTimeEdit->setDateTime(QDateTime::currentDateTime());
 
+    m_mapWidget = new MapWidget(this);
+    ui->mapLayout->addWidget(m_mapWidget);
+
+    m_mapCache = new MapCache(10, this);
+
     initializeThreads();
     connectSignals();
     startAllThreads();
@@ -46,6 +57,9 @@ MainWindow::~MainWindow()
     delete m_navStatusThread;
     delete m_systemMonitorThread;
     delete m_logThread;
+    delete m_mapThread;
+    delete m_mapWidget;
+    delete m_mapCache;
     delete ui;
 }
 
@@ -55,6 +69,7 @@ void MainWindow::initializeThreads()
     m_navStatusThread = new NavStatusThread(this);
     m_systemMonitorThread = new SystemMonitorThread(this);
     m_logThread = new LogThread(this);
+    m_mapThread = new MapThread(this);
 
     m_logTableModel->setStorageEngine(m_logThread->getStorageEngine());
 }
@@ -124,6 +139,24 @@ void MainWindow::connectSignals()
     connect(m_logThread, &LogThread::logFileChanged,
             this, &MainWindow::onLogFileChanged);
 
+    // MapThread信号连接
+    connect(m_mapThread, &MapThread::mapReceived,
+            this, &MainWindow::onMapReceived);
+    connect(m_mapThread, &MapThread::connectionStateChanged,
+            this, &MainWindow::onMapConnectionStateChanged);
+
+    // RobotStatusThread -> MapWidget
+    connect(m_robotStatusThread, &RobotStatusThread::positionReceived,
+            this, [this](double x, double y, double yaw) {
+                if (m_mapWidget) {
+                    m_mapWidget->updateRobotPose(x, y, yaw);
+                }
+            });
+
+    // MapWidget -> MainWindow
+    connect(m_mapWidget, &MapWidget::mapClicked,
+            this, &MainWindow::onMapClicked);
+
     // 线程状态信号连接
     connect(m_robotStatusThread, &RobotStatusThread::threadStarted,
             this, &MainWindow::onThreadStarted);
@@ -153,6 +186,13 @@ void MainWindow::connectSignals()
     connect(m_logThread, &LogThread::threadError,
             this, &MainWindow::onThreadError);
 
+    connect(m_mapThread, &MapThread::threadStarted,
+            this, &MainWindow::onThreadStarted);
+    connect(m_mapThread, &MapThread::threadStopped,
+            this, &MainWindow::onThreadStopped);
+    connect(m_mapThread, &MapThread::threadError,
+            this, &MainWindow::onThreadError);
+
     // 连接过滤控件信号
     connect(ui->debugCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
     connect(ui->infoCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
@@ -168,11 +208,12 @@ void MainWindow::connectSignals()
     connect(ui->queryButton, &QPushButton::clicked, this, &MainWindow::onQueryButtonClicked);
     connect(ui->clearFilterButton, &QPushButton::clicked, this, &MainWindow::onClearFilterButtonClicked);
     connect(ui->refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshButtonClicked);
+    connect(ui->loadMapButton, &QPushButton::clicked, this, &MainWindow::onLoadMapFromFile);
 }
 
 void MainWindow::startAllThreads()
 {
-    // 启动顺序：日志 -> 系统监控 -> 机器人状态 -> 导航状态
+    // 启动顺序：日志 -> 系统监控 -> 机器人状态 -> 导航状态 -> 地图
     m_logThread->start();
     QThread::msleep(100);
 
@@ -183,11 +224,19 @@ void MainWindow::startAllThreads()
     QThread::msleep(100);
 
     m_navStatusThread->start();
+    QThread::msleep(100);
+
+    m_mapThread->start();
 }
 
 void MainWindow::stopAllThreads()
 {
     // 停止顺序与启动相反
+    if (m_mapThread && m_mapThread->isRunning()) {
+        m_mapThread->stopThread();
+        m_mapThread->wait(3000);
+    }
+
     if (m_navStatusThread && m_navStatusThread->isRunning()) {
         m_navStatusThread->stopThread();
         m_navStatusThread->wait(3000);
@@ -366,6 +415,8 @@ void MainWindow::onThreadError(const QString& error)
     m_logTableModel->addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("错误: %1").arg(error), 5000);
+
+    QMessageBox::critical(this, "线程错误", QString("发生线程错误:\n\n%1\n\n请检查日志获取详细信息。").arg(error));
 }
 
 // ==================== 日志查询方法 ====================
@@ -431,6 +482,8 @@ void MainWindow::onQueryFailed(const QString& error)
     m_logTableModel->addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("查询失败: %1").arg(error), 5000);
+
+    QMessageBox::warning(this, "查询失败", QString("日志查询失败:\n\n%1\n\n请检查数据库连接和查询参数。").arg(error));
 }
 
 void MainWindow::onFilterChanged()
@@ -485,4 +538,91 @@ void MainWindow::onClearFilterButtonClicked()
 void MainWindow::onRefreshButtonClicked()
 {
     queryLogsAsync(QDateTime(), QDateTime(), -1, QString(), QString());
+}
+
+// ==================== 地图相关槽函数 ====================
+
+void MainWindow::onMapReceived(const QImage& mapImage, double resolution, double originX, double originY)
+{
+    if (m_mapWidget) {
+        m_mapWidget->setMapImage(mapImage, resolution, originX, originY);
+    }
+}
+
+void MainWindow::onMapClicked(double x, double y)
+{
+    QString message = QString("地图点击位置: (%1, %2)").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Map", "Click");
+    m_logTableModel->addLogEntry(entry);
+}
+
+void MainWindow::onMapConnectionStateChanged(bool connected)
+{
+    QString status = connected ? "已连接" : "已断开";
+    QString message = QString("地图连接状态: %1").arg(status);
+    LogEntry entry(message, connected ? LOG_INFO : LOG_WARNING, QDateTime::currentDateTime(), "Map", "Connection");
+    m_logTableModel->addLogEntry(entry);
+
+    ui->statusbar->showMessage(QString("地图: %1").arg(status), 3000);
+
+    if (!connected) {
+        qWarning() << "[MainWindow] 地图连接已断开，请检查ROS2环境";
+        QMessageBox::warning(this, "地图连接断开", "地图连接已断开，请检查ROS2环境\n\n可能的原因：\n1. ROS2 节点未启动\n2. 地图服务器未运行\n3. 网络连接问题");
+    }
+}
+
+void MainWindow::onLoadMapFromFile()
+{
+    QString filePath = QFileDialog::getOpenFileName(
+        this,
+        "选择地图文件",
+        "",
+        "YAML Files (*.yaml *.yml)"
+    );
+
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    nav_msgs::msg::OccupancyGrid::SharedPtr map;
+
+    if (m_mapCache && m_mapCache->contains(filePath)) {
+        map = m_mapCache->get(filePath);
+        qDebug() << "[MainWindow] 从缓存加载地图:" << filePath;
+    } else {
+        map = MapLoader::loadFromFile(filePath);
+        if (!map) {
+            QMessageBox::warning(this, "错误", "无法加载地图文件");
+            return;
+        }
+
+        if (m_mapCache) {
+            m_mapCache->add(filePath, map);
+        }
+    }
+
+    QImage mapImage = MapConverter::convertToImage(map);
+    if (mapImage.isNull()) {
+        QMessageBox::warning(this, "错误", "无法转换地图图像");
+        return;
+    }
+
+    if (m_mapWidget) {
+        m_mapWidget->setMapImage(
+            mapImage,
+            map->info.resolution,
+            map->info.origin.position.x,
+            map->info.origin.position.y
+        );
+    }
+
+    QString message = QString("地图文件加载成功 - 文件: %1, 尺寸: %2x%3, 分辨率: %4")
+        .arg(filePath)
+        .arg(map->info.width)
+        .arg(map->info.height)
+        .arg(map->info.resolution, 0, 'f', 3);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Map", "FileLoad");
+    m_logTableModel->addLogEntry(entry);
+
+    ui->statusbar->showMessage(QString("地图已加载: %1").arg(QFileInfo(filePath).fileName()), 3000);
 }

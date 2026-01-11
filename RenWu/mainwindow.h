@@ -10,6 +10,9 @@
 #include "logtablemodel.h"
 #include "logfilterproxymodel.h"
 #include "logquerytask.h"
+#include "mapthread.h"
+#include "mapwidget.h"
+#include "mapcache.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -69,6 +72,12 @@ private slots:
     void onClearFilterButtonClicked();
     void onRefreshButtonClicked();
 
+    // 地图相关槽函数
+    void onMapReceived(const QImage& mapImage, double resolution, double originX, double originY);
+    void onMapClicked(double x, double y);
+    void onMapConnectionStateChanged(bool connected);
+    void onLoadMapFromFile();
+
 private:
     void initializeThreads();
     void connectSignals();
@@ -85,6 +94,9 @@ private:
     LogTableModel* m_logTableModel;
     LogFilterProxyModel* m_logFilterProxyModel;
     QThreadPool* m_threadPool;
+    MapThread* m_mapThread;
+    MapWidget* m_mapWidget;
+    MapCache* m_mapCache;
 };
 
 #endif // MAINWINDOW_H

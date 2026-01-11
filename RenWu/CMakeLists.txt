@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.5)
 
-project(RenWu VERSION 0.1 LANGUAGES CXX)
+project(renwu VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
@@ -19,8 +19,8 @@ if(CMAKE_VERSION VERSION_LESS "3.16")
 endif()
 
 find_package(ament_cmake REQUIRED)
-find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets Concurrent Sql REQUIRED)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Concurrent Sql)
+find_package(QT NAMES Qt6 Qt5 COMPONENTS Widgets Concurrent Sql Test REQUIRED)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Concurrent Sql Test)
 
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
@@ -65,19 +65,29 @@ set(PROJECT_SOURCES
         logquerytask.h
         logquerytask.cpp
         threadsafequeue.h
+        mapconverter.h
+        mapconverter.cpp
+        mapthread.h
+        mapthread.cpp
+        mapwidget.h
+        mapwidget.cpp
+        maploader.h
+        maploader.cpp
+        mapcache.h
+        mapcache.cpp
 )
 
-add_executable(RenWu
+add_executable(renwu
     ${PROJECT_SOURCES}
 )
 
-target_link_libraries(RenWu PRIVATE
+target_link_libraries(renwu PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Concurrent
     Qt${QT_VERSION_MAJOR}::Sql
 )
 
-ament_target_dependencies(RenWu PUBLIC
+ament_target_dependencies(renwu PUBLIC
     rclcpp
     rclcpp_action
     std_msgs
@@ -90,10 +100,64 @@ ament_target_dependencies(RenWu PUBLIC
     rcl_interfaces
 )
 
-set_target_properties(RenWu PROPERTIES
+set_target_properties(renwu PROPERTIES
     MACOSX_BUNDLE_GUI_IDENTIFIER my.example.com
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
 )
+
+if(BUILD_TESTING)
+    enable_testing()
+
+    set(TEST_SOURCES
+        test/main.cpp
+        test/testmapconverter.cpp
+        test/testmapconverter.h
+        test/testmapwidget.cpp
+        test/testmapwidget.h
+        test/testintegration.cpp
+        test/testintegration.h
+        test/testsystem.cpp
+        test/testsystem.h
+        test/testmaploader.cpp
+        test/testmaploader.h
+        basethread.h
+        basethread.cpp
+        roscontextmanager.h
+        roscontextmanager.cpp
+        mapconverter.h
+        mapconverter.cpp
+        mapthread.h
+        mapthread.cpp
+        mapwidget.h
+        mapwidget.cpp
+        maploader.h
+        maploader.cpp
+        mapcache.h
+        mapcache.cpp
+    )
+
+    add_executable(renwu_tests ${TEST_SOURCES})
+
+    target_link_libraries(renwu_tests PRIVATE
+        Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::Test
+    )
+
+    ament_target_dependencies(renwu_tests PUBLIC
+        rclcpp
+        nav_msgs
+        diagnostic_msgs
+        sensor_msgs
+    )
+
+    target_include_directories(renwu_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    add_test(NAME renwu_tests COMMAND renwu_tests)
+endif()
+
+ament_package()
