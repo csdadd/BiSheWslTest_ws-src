@@ -1,5 +1,7 @@
 #include "mapwidget.h"
 #include <QDebug>
+#include <cmath>
+#include <QtMath>
 
 // 构造函数：初始化地图显示控件
 MapWidget::MapWidget(QWidget* parent)

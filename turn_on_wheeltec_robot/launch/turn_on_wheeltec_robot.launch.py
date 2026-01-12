@@ -69,7 +69,7 @@ def generate_launch_description():
     #!!!At the same time, you need to modify ld.add_action(minibot_type) and #ld.add_action(flagship_type)
     minibot_type = IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(launch_dir, 'robot_mode_description_minibot.launch.py')),
-            launch_arguments={'mini_mec': 'true'}.items(),
+            launch_arguments={'mini_akm': 'true'}.items(),
     )
 
 

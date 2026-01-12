@@ -113,7 +113,7 @@ void InfoThread::subscribeROSTopics()
 
 void InfoThread::process()
 {
-    qDebug() << "[InfoThread] 正在运行 - 处理ROS话题订阅";
+    // qDebug() << "[InfoThread] 正在运行 - 处理ROS话题订阅";
 
     QString currentTime = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
     emit systemTimeReceived(currentTime);

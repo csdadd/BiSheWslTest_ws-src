@@ -27,7 +27,7 @@ void SystemMonitorThread::initialize()
         m_executor->add_node(m_rosNode);
         setExecutor(m_executor);
 
-        m_storageEngine = new LogStorageEngine(this);
+        m_storageEngine = new LogStorageEngine(nullptr);
         QString dbPath = QCoreApplication::applicationDirPath() + "/logs/system_monitor.db";
         if (!m_storageEngine->initialize(dbPath)) {
             emit threadError(QString("Failed to initialize LogStorageEngine: %1").arg(m_storageEngine->getLastError()));
@@ -82,7 +82,7 @@ void SystemMonitorThread::subscribeROSTopics()
 
 void SystemMonitorThread::process()
 {
-    qDebug() << "[SystemMonitorThread] 正在运行 - 监控ROS日志、碰撞检测和行为树";
+    // qDebug() << "[SystemMonitorThread] 正在运行 - 监控ROS日志、碰撞检测和行为树";
 
     QVector<StorageLogEntry> batchEntries;
     MonitorLogEntry entry;

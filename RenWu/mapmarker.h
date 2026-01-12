@@ -12,6 +12,11 @@ struct MapMarker
     QPointF position;
     QColor color;
     QString description;
+
+    MapMarker() = default;
+
+    MapMarker(double x, double y, const QColor& c, const QString& n, const QString& desc)
+        : name(n), position(x, y), color(c), description(desc) {}
 };
 
 class MapMarkerManager

@@ -6,6 +6,7 @@
 #include "logstorageengine.h"
 #include <QFile>
 #include <QTextStream>
+#include <QTextCodec>
 #include <QDateTime>
 #include <QMutex>
 

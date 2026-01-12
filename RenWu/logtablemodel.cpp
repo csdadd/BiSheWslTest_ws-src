@@ -1,5 +1,6 @@
 #include "logtablemodel.h"
 #include <QColor>
+#include <QDebug>
 
 LogTableModel::LogTableModel(QObject* parent)
     : QAbstractTableModel(parent)

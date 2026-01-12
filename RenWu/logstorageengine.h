@@ -34,6 +34,9 @@ struct StorageLogEntry {
           filePath(file), lineNumber(line) {}
 };
 
+Q_DECLARE_METATYPE(StorageLogEntry)
+Q_DECLARE_METATYPE(QVector<StorageLogEntry>)
+
 class LogStorageEngine : public QObject
 {
     Q_OBJECT
@@ -77,6 +80,7 @@ private:
 
 private:
     QSqlDatabase m_database;
+    QString m_connectionName;
     QString m_dbPath;
     bool m_initialized;
     mutable QReadWriteLock m_lock;

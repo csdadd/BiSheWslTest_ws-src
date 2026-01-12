@@ -62,7 +62,7 @@ void NavStatusThread::subscribeROSTopics()
 
 void NavStatusThread::process()
 {
-    qDebug() << "[NavStatusThread] 正在运行 - 获取导航状态、反馈和路径信息";
+    // qDebug() << "[NavStatusThread] 正在运行 - 获取导航状态、反馈和路径信息";
     if (m_executor && m_rosNode) {
         m_executor->spin_some();
     }

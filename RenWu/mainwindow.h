@@ -13,6 +13,13 @@
 #include "mapthread.h"
 #include "mapwidget.h"
 #include "mapcache.h"
+#include "navigationactionclient.h"
+#include "pathvisualizer.h"
+#include "userstorageengine.h"
+#include "userauthmanager.h"
+#include "logindialog.h"
+#include "usermanagementdialog.h"
+#include "user.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -41,6 +48,7 @@ private slots:
     void onOdometryReceived(double x, double y, double yaw, double vx, double vy, double omega);
     void onSystemTimeReceived(const QString& time);
     void onDiagnosticsReceived(const QString& status, int level, const QString& message);
+    void updateCurrentTime();
 
     // NavStatusThread槽函数
     void onNavigationStatusReceived(int status, const QString& message);
@@ -78,6 +86,23 @@ private slots:
     void onMapConnectionStateChanged(bool connected);
     void onLoadMapFromFile();
 
+    void onStartNavigation();
+    void onCancelNavigation();
+    void onClearGoal();
+    void onNavigationFeedback(double distanceRemaining, double navigationTime, int recoveries);
+    void onNavigationResult(bool success, const QString& message);
+    void onGoalAccepted();
+    void onGoalRejected(const QString& reason);
+    void onGoalCanceled();
+
+    // 用户权限管理槽函数
+    void onLoginSuccess(const User& user);
+    void onLoginFailed(const QString& reason);
+    void onLogout();
+    void onUserManagement();
+    void onChangePassword();
+    void updateUIBasedOnPermission();
+
 private:
     void initializeThreads();
     void connectSignals();
@@ -97,6 +122,18 @@ private:
     MapThread* m_mapThread;
     MapWidget* m_mapWidget;
     MapCache* m_mapCache;
+    NavigationActionClient* m_navigationClient;
+    PathVisualizer* m_pathVisualizer;
+    double m_targetX;
+    double m_targetY;
+    double m_targetYaw;
+    bool m_hasTarget;
+    QDateTime m_startTime;
+
+    UserStorageEngine* m_userStorageEngine;
+    UserAuthManager* m_userAuthManager;
+    LoginDialog* m_loginDialog;
+    UserManagementDialog* m_userManagementDialog;
 };
 
 #endif // MAINWINDOW_H

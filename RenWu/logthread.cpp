@@ -46,12 +46,12 @@ void LogThread::initialize()
         m_logFile.setFileName(m_logFilePath);
         if (m_logFile.open(QIODevice::WriteOnly | QIODevice::Append)) {
             m_logStream.setDevice(&m_logFile);
-            m_logStream.setEncoding(QStringConverter::Utf8);
+            m_logStream.setCodec(QTextCodec::codecForName("UTF-8"));
         } else {
             emit threadError(QString("Failed to open log file: %1").arg(m_logFilePath));
         }
 
-        m_storageEngine = new LogStorageEngine(this);
+        m_storageEngine = new LogStorageEngine(nullptr);
         QString dbPath = m_logDirectory + "/app_logs.db";
         if (!m_storageEngine->initialize(dbPath)) {
             emit threadError(QString("Failed to initialize LogStorageEngine: %1").arg(m_storageEngine->getLastError()));
@@ -68,7 +68,7 @@ void LogThread::initialize()
 
 void LogThread::process()
 {
-    qDebug() << "[LogThread] 正在运行 - 处理日志队列";
+    // qDebug() << "[LogThread] 正在运行 - 处理日志队列";
     processLogQueue();
 }
 
@@ -167,7 +167,7 @@ void LogThread::rotateLogFile()
 
         m_logFile.open(QIODevice::WriteOnly | QIODevice::Append);
         m_logStream.setDevice(&m_logFile);
-        m_logStream.setEncoding(QStringConverter::Utf8);
+        m_logStream.setCodec(QTextCodec::codecForName("UTF-8"));
     }
 }
 

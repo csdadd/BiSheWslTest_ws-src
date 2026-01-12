@@ -19,7 +19,13 @@
   <depend>action_msgs</depend>
   <depend>nav2_msgs</depend>
   <depend>rcl_interfaces</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>libqt5-dev</depend>
+  <depend>qtbase5-dev</depend>
 
-  <build_depend>libqt5-dev</build_depend>
-  <build_depend>qtbase5-dev</build_depend>
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>

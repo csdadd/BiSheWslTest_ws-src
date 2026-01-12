@@ -5,6 +5,7 @@
 #include <QStandardPaths>
 #include <QDebug>
 #include <QMutexLocker>
+#include <QThread>
 
 LogStorageEngine::LogStorageEngine(QObject* parent)
     : QObject(parent)
@@ -16,6 +17,9 @@ LogStorageEngine::~LogStorageEngine()
 {
     if (m_database.isOpen()) {
         m_database.close();
+    }
+    if (!m_connectionName.isEmpty()) {
+        QSqlDatabase::removeDatabase(m_connectionName);
     }
 }
 
@@ -39,11 +43,10 @@ bool LogStorageEngine::initialize(const QString& dbPath)
         m_dbPath = dbPath;
     }
 
-    if (QSqlDatabase::contains("log_connection")) {
-        m_database = QSqlDatabase::database("log_connection");
-    } else {
-        m_database = QSqlDatabase::addDatabase("QSQLITE", "log_connection");
-    }
+    m_connectionName = QString("LogStorageEngine_%1").arg(
+        reinterpret_cast<quintptr>(QThread::currentThreadId())
+    );
+    m_database = QSqlDatabase::addDatabase("QSQLITE", m_connectionName);
 
     m_database.setDatabaseName(m_dbPath);
 

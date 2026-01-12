@@ -4,9 +4,12 @@
 #include <QDebug>
 #include <QDateTime>
 #include <QFileDialog>
+#include <QTimer>
 #include <algorithm>
 #include "maploader.h"
 #include "mapconverter.h"
+#include "mapmarker.h"
+#include <nav_msgs/msg/path.hpp>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -20,8 +23,67 @@ MainWindow::MainWindow(QWidget *parent)
     , m_mapThread(nullptr)
     , m_mapWidget(nullptr)
     , m_mapCache(nullptr)
+    , m_navigationClient(nullptr)
+    , m_pathVisualizer(nullptr)
+    , m_targetX(0.0)
+    , m_targetY(0.0)
+    , m_targetYaw(0.0)
+    , m_hasTarget(false)
+    , m_startTime(QDateTime::currentDateTime())
+    , m_userStorageEngine(nullptr)
+    , m_userAuthManager(nullptr)
+    , m_loginDialog(nullptr)
+    , m_userManagementDialog(nullptr)
 {
     ui->setupUi(this);
+
+    qDebug() << "[MainWindow] 正在初始化用户存储引擎...";
+    m_userStorageEngine = new UserStorageEngine(this);
+    if (!m_userStorageEngine->initialize()) {
+        qCritical() << "[MainWindow] 错误：用户存储引擎初始化失败！";
+        QMessageBox::critical(this, "错误", "用户存储引擎初始化失败！\n\n程序无法继续运行。");
+        exit(1);
+    }
+
+    qDebug() << "[MainWindow] 用户存储引擎初始化成功";
+
+    qDebug() << "[MainWindow] 正在初始化用户认证管理器...";
+    m_userAuthManager = new UserAuthManager(this);
+    if (!m_userAuthManager->initialize(m_userStorageEngine)) {
+        qCritical() << "[MainWindow] 错误：用户认证管理器初始化失败！";
+        QMessageBox::critical(this, "错误", "用户认证管理器初始化失败！\n\n程序无法继续运行。");
+        exit(1);
+    }
+
+    qDebug() << "[MainWindow] 用户认证管理器初始化成功";
+
+    qDebug() << "[MainWindow] 正在创建登录对话框...";
+    m_loginDialog = new LoginDialog(m_userAuthManager, this);
+    if (!m_loginDialog) {
+        qCritical() << "[MainWindow] 错误：登录对话框创建失败！";
+        QMessageBox::critical(this, "错误", "登录对话框创建失败！\n\n程序无法继续运行。");
+        exit(1);
+    }
+
+    qDebug() << "[MainWindow] 登录对话框创建成功，正在显示登录界面...";
+    int dialogResult = m_loginDialog->exec();
+
+    if (dialogResult != QDialog::Accepted) {
+        qWarning() << "[MainWindow] 警告：登录对话框被用户取消或关闭";
+        if (!m_userAuthManager->isLoggedIn()) {
+            qCritical() << "[MainWindow] 错误：用户未登录，程序将退出";
+            QMessageBox::critical(this, "错误", "登录失败，程序将退出");
+            exit(1);
+        }
+    }
+
+    if (!m_userAuthManager->isLoggedIn()) {
+        qCritical() << "[MainWindow] 错误：登录验证失败，程序将退出";
+        QMessageBox::critical(this, "错误", "登录失败，程序将退出");
+        exit(1);
+    }
+
+    qDebug() << "[MainWindow] 用户登录成功:" << m_userAuthManager->getCurrentUsername();
 
     m_logTableModel = new LogTableModel(this);
     m_logFilterProxyModel = new LogFilterProxyModel(this);
@@ -44,9 +106,18 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_mapCache = new MapCache(10, this);
 
+    m_navigationClient = new NavigationActionClient(this);
+    m_pathVisualizer = new PathVisualizer(m_mapWidget->scene(), this);
+
+    QTimer* currentTimeTimer = new QTimer(this);
+    connect(currentTimeTimer, &QTimer::timeout, this, &MainWindow::updateCurrentTime);
+    currentTimeTimer->start(1000);
+
     initializeThreads();
     connectSignals();
     startAllThreads();
+
+    updateUIBasedOnPermission();
 }
 
 MainWindow::~MainWindow()
@@ -60,6 +131,8 @@ MainWindow::~MainWindow()
     delete m_mapThread;
     delete m_mapWidget;
     delete m_mapCache;
+    delete m_navigationClient;
+    delete m_pathVisualizer;
     delete ui;
 }
 
@@ -209,6 +282,26 @@ void MainWindow::connectSignals()
     connect(ui->clearFilterButton, &QPushButton::clicked, this, &MainWindow::onClearFilterButtonClicked);
     connect(ui->refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshButtonClicked);
     connect(ui->loadMapButton, &QPushButton::clicked, this, &MainWindow::onLoadMapFromFile);
+    connect(ui->btnStartNavigation, &QPushButton::clicked, this, &MainWindow::onStartNavigation);
+    connect(ui->btnCancelNavigation, &QPushButton::clicked, this, &MainWindow::onCancelNavigation);
+    connect(ui->btnClearGoal, &QPushButton::clicked, this, &MainWindow::onClearGoal);
+
+    // 用户菜单信号连接
+    connect(ui->actionUserManagement, &QAction::triggered, this, &MainWindow::onUserManagement);
+    connect(ui->actionChangePassword, &QAction::triggered, this, &MainWindow::onChangePassword);
+    connect(ui->actionLogout, &QAction::triggered, this, &MainWindow::onLogout);
+
+    // NavigationActionClient信号连接
+    connect(m_navigationClient, &NavigationActionClient::goalAccepted,
+            this, &MainWindow::onGoalAccepted);
+    connect(m_navigationClient, &NavigationActionClient::goalRejected,
+            this, &MainWindow::onGoalRejected);
+    connect(m_navigationClient, &NavigationActionClient::feedbackReceived,
+            this, &MainWindow::onNavigationFeedback);
+    connect(m_navigationClient, &NavigationActionClient::resultReceived,
+            this, &MainWindow::onNavigationResult);
+    connect(m_navigationClient, &NavigationActionClient::goalCanceled,
+            this, &MainWindow::onGoalCanceled);
 }
 
 void MainWindow::startAllThreads()
@@ -262,6 +355,32 @@ void MainWindow::stopAllThreads()
 
 void MainWindow::onBatteryStatusReceived(float voltage, float percentage)
 {
+    ui->labelVoltage->setText(QString("%1 V").arg(voltage, 0, 'f', 2));
+    ui->labelPercentage->setText(QString("%1 %").arg(percentage, 0, 'f', 1));
+
+    QString statusText;
+    QString color;
+
+    if (voltage > 13.0f) {
+        statusText = "充电中";
+        color = "green";
+    } else if (percentage < 20.0f) {
+        statusText = "低电量警告";
+        color = "red";
+    } else {
+        statusText = "放电中";
+        color = "blue";
+    }
+
+    ui->labelBatteryStatus->setText(QString("状态：%1").arg(statusText));
+    ui->labelBatteryStatus->setStyleSheet(QString("color: %1;").arg(color));
+
+    if (percentage < 20.0f) {
+        ui->labelPercentage->setStyleSheet("color: red; font-weight: bold;");
+    } else {
+        ui->labelPercentage->setStyleSheet("");
+    }
+
     QString message = QString("电池状态 - 电压: %1 V, 电量: %2%").arg(voltage, 0, 'f', 2).arg(percentage, 0, 'f', 1);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Battery");
     m_logTableModel->addLogEntry(entry);
@@ -269,6 +388,12 @@ void MainWindow::onBatteryStatusReceived(float voltage, float percentage)
 
 void MainWindow::onPositionReceived(double x, double y, double yaw)
 {
+    ui->labelX->setText(QString("%1 m").arg(x, 0, 'f', 3));
+    ui->labelY->setText(QString("%1 m").arg(y, 0, 'f', 3));
+    
+    double yaw_degrees = yaw * 180.0 / M_PI;
+    ui->labelYaw->setText(QString("%1 °").arg(yaw_degrees, 0, 'f', 1));
+
     QString message = QString("位置信息 - X: %1, Y: %2, Yaw: %3").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Position");
     m_logTableModel->addLogEntry(entry);
@@ -276,6 +401,14 @@ void MainWindow::onPositionReceived(double x, double y, double yaw)
 
 void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, double vy, double omega)
 {
+    if (ui->labelX->text() == "-- m") {
+        ui->labelX->setText(QString("%1 m").arg(x, 0, 'f', 3));
+        ui->labelY->setText(QString("%1 m").arg(y, 0, 'f', 3));
+        
+        double yaw_degrees = yaw * 180.0 / M_PI;
+        ui->labelYaw->setText(QString("%1 °").arg(yaw_degrees, 0, 'f', 1));
+    }
+
     QString message = QString("里程计 - 位置(X:%1, Y:%2, Yaw:%3), 速度(vx:%4, vy:%5, omega:%6)")
         .arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2)
         .arg(vx, 0, 'f', 2).arg(vy, 0, 'f', 2).arg(omega, 0, 'f', 2);
@@ -285,6 +418,7 @@ void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, d
 
 void MainWindow::onSystemTimeReceived(const QString& time)
 {
+    ui->labelCurrentTime->setText(time);
     ui->statusbar->showMessage(QString("系统时间: %1").arg(time));
 }
 
@@ -338,6 +472,25 @@ void MainWindow::onNavigationPathReceived(const QVector<QPointF>& path)
     QString message = QString("导航路径 - 路径点数: %1").arg(path.size());
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
     m_logTableModel->addLogEntry(entry);
+
+    if (m_pathVisualizer && m_mapWidget) {
+        nav_msgs::msg::Path rosPath;
+        rosPath.poses.reserve(path.size());
+        
+        for (const QPointF& point : path) {
+            geometry_msgs::msg::PoseStamped pose;
+            pose.header.frame_id = "map";
+            pose.pose.position.x = point.x();
+            pose.pose.position.y = point.y();
+            pose.pose.position.z = 0.0;
+            rosPath.poses.push_back(pose);
+        }
+
+        double resolution = 0.05;
+        double originX = 0.0;
+        double originY = 0.0;
+        m_pathVisualizer->updatePath(rosPath, resolution, QPointF(originX, originY));
+    }
 }
 
 // ==================== SystemMonitorThread槽函数 ====================
@@ -396,23 +549,23 @@ void MainWindow::onConnectionStateChanged(bool connected)
 
 void MainWindow::onThreadStarted(const QString& threadName)
 {
-    QString message = QString("线程启动 - %1").arg(threadName);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
-    m_logTableModel->addLogEntry(entry);
+    // QString message = QString("线程启动 - %1").arg(threadName);
+    // LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
+    // m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onThreadStopped(const QString& threadName)
 {
-    QString message = QString("线程停止 - %1").arg(threadName);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
-    m_logTableModel->addLogEntry(entry);
+    // QString message = QString("线程停止 - %1").arg(threadName);
+    // LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
+    // m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onThreadError(const QString& error)
 {
     QString message = QString("线程错误 - %1").arg(error);
-    LogEntry entry(message, LOG_ERROR, QDateTime::currentDateTime(), "System", "Thread");
-    m_logTableModel->addLogEntry(entry);
+    // LogEntry entry(message, LOG_ERROR, QDateTime::currentDateTime(), "System", "Thread");
+    // m_logTableModel->addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("错误: %1").arg(error), 5000);
 
@@ -551,7 +704,20 @@ void MainWindow::onMapReceived(const QImage& mapImage, double resolution, double
 
 void MainWindow::onMapClicked(double x, double y)
 {
-    QString message = QString("地图点击位置: (%1, %2)").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2);
+    m_targetX = x;
+    m_targetY = y;
+    m_targetYaw = 0.0;
+    m_hasTarget = true;
+
+    if (m_mapWidget) {
+        m_mapWidget->clearMarkers();
+        MapMarker marker(x, y, QColor(255, 0, 0), "目标点", "导航目标");
+        m_mapWidget->addMarker(marker);
+    }
+
+    ui->labelTargetPosition->setText(QString("(%1, %2)").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2));
+
+    QString message = QString("地图点击位置: (%1, %2) - 已设置为导航目标").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Map", "Click");
     m_logTableModel->addLogEntry(entry);
 }
@@ -625,4 +791,276 @@ void MainWindow::onLoadMapFromFile()
     m_logTableModel->addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("地图已加载: %1").arg(QFileInfo(filePath).fileName()), 3000);
+}
+
+void MainWindow::onStartNavigation()
+{
+    if (!m_hasTarget) {
+        QMessageBox::warning(this, "警告", "请先在地图上点击设置目标点");
+        return;
+    }
+
+    if (m_navigationClient->isNavigating()) {
+        QMessageBox::information(this, "提示", "正在导航中，请先取消当前导航");
+        return;
+    }
+
+    bool success = m_navigationClient->sendGoal(m_targetX, m_targetY, m_targetYaw);
+    if (!success) {
+        QMessageBox::critical(this, "错误", "发送导航目标失败");
+    }
+}
+
+void MainWindow::onCancelNavigation()
+{
+    if (!m_navigationClient->isNavigating()) {
+        return;
+    }
+
+    bool success = m_navigationClient->cancelGoal();
+    if (!success) {
+        QMessageBox::warning(this, "警告", "取消导航失败");
+    }
+}
+
+void MainWindow::onClearGoal()
+{
+    m_hasTarget = false;
+    m_targetX = 0.0;
+    m_targetY = 0.0;
+    m_targetYaw = 0.0;
+    
+    if (m_mapWidget) {
+        m_mapWidget->clearMarkers();
+    }
+
+    if (m_pathVisualizer) {
+        m_pathVisualizer->clearPath();
+    }
+
+    ui->labelTargetPosition->setText("未设置");
+    ui->labelNavigationStatus->setText("空闲");
+    ui->labelNavigationStatus->setStyleSheet("color: gray;");
+    ui->labelDistanceRemaining->setText("-- m");
+    ui->labelNavigationTime->setText("-- s");
+    ui->labelRecoveries->setText("0");
+}
+
+void MainWindow::onNavigationFeedback(double distanceRemaining, double navigationTime, int recoveries)
+{
+    ui->labelDistanceRemaining->setText(QString::number(distanceRemaining, 'f', 2) + " m");
+    ui->labelNavigationTime->setText(QString::number(navigationTime, 'f', 1) + " s");
+    ui->labelRecoveries->setText(QString::number(recoveries));
+
+    QString message = QString("导航反馈 - 剩余距离: %1m, 导航时间: %2s, 恢复次数: %3")
+        .arg(distanceRemaining, 0, 'f', 2)
+        .arg(navigationTime, 0, 'f', 1)
+        .arg(recoveries);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Navigation", "Feedback");
+    m_logTableModel->addLogEntry(entry);
+}
+
+void MainWindow::onNavigationResult(bool success, const QString& message)
+{
+    if (success) {
+        QMessageBox::information(this, "导航完成", "导航成功到达目标点");
+        ui->labelNavigationStatus->setText("导航成功");
+        ui->labelNavigationStatus->setStyleSheet("color: green;");
+    } else {
+        QMessageBox::warning(this, "导航失败", message);
+        ui->labelNavigationStatus->setText("导航失败");
+        ui->labelNavigationStatus->setStyleSheet("color: red;");
+    }
+
+    QString logMessage = QString("导航结果 - %1: %2").arg(success ? "成功" : "失败").arg(message);
+    LogEntry entry(logMessage, success ? LOG_INFO : LOG_WARNING, QDateTime::currentDateTime(), "Navigation", "Result");
+    m_logTableModel->addLogEntry(entry);
+}
+
+void MainWindow::onGoalAccepted()
+{
+    ui->labelNavigationStatus->setText("导航中...");
+    ui->labelNavigationStatus->setStyleSheet("color: blue;");
+
+    QString message = "导航目标已被接受，开始导航";
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
+    m_logTableModel->addLogEntry(entry);
+    ui->statusbar->showMessage(message, 3000);
+}
+
+void MainWindow::onGoalRejected(const QString& reason)
+{
+    QMessageBox::warning(this, "目标被拒绝", reason);
+    ui->labelNavigationStatus->setText("目标被拒绝");
+    ui->labelNavigationStatus->setStyleSheet("color: orange;");
+
+    QString message = QString("导航目标被拒绝 - 原因: %1").arg(reason);
+    LogEntry entry(message, LOG_WARNING, QDateTime::currentDateTime(), "Navigation", "Goal");
+    m_logTableModel->addLogEntry(entry);
+}
+
+void MainWindow::onGoalCanceled()
+{
+    QMessageBox::information(this, "导航已取消", "导航目标已取消");
+    ui->labelNavigationStatus->setText("已取消");
+    ui->labelNavigationStatus->setStyleSheet("color: gray;");
+
+    QString message = "导航目标已取消";
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
+    m_logTableModel->addLogEntry(entry);
+}
+
+void MainWindow::updateCurrentTime()
+{
+    QString currentTime = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+    ui->labelCurrentTime->setText(currentTime);
+
+    qint64 uptimeSec = m_startTime.secsTo(QDateTime::currentDateTime());
+    int hours = uptimeSec / 3600;
+    int minutes = (uptimeSec % 3600) / 60;
+    int seconds = uptimeSec % 60;
+
+    QString uptimeStr = QString("%1:%2:%3")
+        .arg(hours, 2, 10, QChar('0'))
+        .arg(minutes, 2, 10, QChar('0'))
+        .arg(seconds, 2, 10, QChar('0'));
+
+    ui->labelUptime->setText(uptimeStr);
+}
+
+// ==================== 用户权限管理槽函数 ====================
+
+void MainWindow::onLoginSuccess(const User& user)
+{
+    qDebug() << "[MainWindow] Login successful for user:" << user.username;
+    updateUIBasedOnPermission();
+}
+
+void MainWindow::onLoginFailed(const QString& reason)
+{
+    qDebug() << "[MainWindow] Login failed:" << reason;
+}
+
+void MainWindow::onLogout()
+{
+    m_userAuthManager->logout();
+    m_loginDialog->exec();
+
+    if (!m_userAuthManager->isLoggedIn()) {
+        QMessageBox::critical(this, "错误", "登录失败，程序将退出");
+        exit(1);
+    }
+
+    updateUIBasedOnPermission();
+}
+
+void MainWindow::onUserManagement()
+{
+    if (!m_userAuthManager->canAdmin()) {
+        QMessageBox::warning(this, "权限不足", "您没有权限访问用户管理功能");
+        return;
+    }
+
+    m_userManagementDialog = new UserManagementDialog(m_userAuthManager, this);
+    m_userManagementDialog->exec();
+    delete m_userManagementDialog;
+    m_userManagementDialog = nullptr;
+}
+
+void MainWindow::onChangePassword()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("修改密码");
+    dialog.setModal(true);
+    dialog.setFixedSize(350, 250);
+
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+
+    QFormLayout* formLayout = new QFormLayout();
+
+    QLineEdit* oldPasswordEdit = new QLineEdit(&dialog);
+    oldPasswordEdit->setPlaceholderText("请输入旧密码");
+    oldPasswordEdit->setEchoMode(QLineEdit::Password);
+    formLayout->addRow("旧密码:", oldPasswordEdit);
+
+    QLineEdit* newPasswordEdit = new QLineEdit(&dialog);
+    newPasswordEdit->setPlaceholderText("请输入新密码");
+    newPasswordEdit->setEchoMode(QLineEdit::Password);
+    formLayout->addRow("新密码:", newPasswordEdit);
+
+    QLineEdit* confirmPasswordEdit = new QLineEdit(&dialog);
+    confirmPasswordEdit->setPlaceholderText("请确认新密码");
+    confirmPasswordEdit->setEchoMode(QLineEdit::Password);
+    formLayout->addRow("确认密码:", confirmPasswordEdit);
+
+    layout->addLayout(formLayout);
+
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    QPushButton* okButton = new QPushButton("确定", &dialog);
+    QPushButton* cancelButton = new QPushButton("取消", &dialog);
+    buttonLayout->addWidget(okButton);
+    buttonLayout->addWidget(cancelButton);
+    layout->addLayout(buttonLayout);
+
+    connect(okButton, &QPushButton::clicked, [&]() {
+        QString oldPassword = oldPasswordEdit->text();
+        QString newPassword = newPasswordEdit->text();
+        QString confirmPassword = confirmPasswordEdit->text();
+
+        if (oldPassword.isEmpty()) {
+            QMessageBox::warning(&dialog, "错误", "请输入旧密码");
+            return;
+        }
+
+        if (newPassword.isEmpty()) {
+            QMessageBox::warning(&dialog, "错误", "请输入新密码");
+            return;
+        }
+
+        if (newPassword != confirmPassword) {
+            QMessageBox::warning(&dialog, "错误", "两次输入的密码不一致");
+            return;
+        }
+
+        if (m_userAuthManager->changePassword(oldPassword, newPassword)) {
+            QMessageBox::information(&dialog, "成功", "密码修改成功");
+            dialog.accept();
+        } else {
+            QMessageBox::critical(&dialog, "错误", m_userAuthManager->getLastError());
+        }
+    });
+
+    connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
+
+    dialog.exec();
+}
+
+void MainWindow::updateUIBasedOnPermission()
+{
+    UserPermission permission = m_userAuthManager->getCurrentPermission();
+
+    bool canOperate = m_userAuthManager->canOperate();
+    bool canAdmin = m_userAuthManager->canAdmin();
+
+    ui->btnStartNavigation->setEnabled(canOperate);
+    ui->btnCancelNavigation->setEnabled(canOperate);
+    ui->btnClearGoal->setEnabled(canOperate);
+
+    QString permissionText;
+    switch (permission) {
+        case UserPermission::VIEWER:
+            permissionText = "查看者";
+            break;
+        case UserPermission::OPERATOR:
+            permissionText = "操作员";
+            break;
+        case UserPermission::ADMIN:
+            permissionText = "管理员";
+            break;
+    }
+
+    QString statusText = QString("当前用户: %1 (%2)").arg(m_userAuthManager->getCurrentUsername()).arg(permissionText);
+    ui->statusbar->showMessage(statusText, 0);
+
+    qDebug() << "[MainWindow] UI updated based on permission:" << permissionText;
 }
