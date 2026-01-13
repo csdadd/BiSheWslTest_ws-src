@@ -137,7 +137,7 @@ void LogThread::writeToFile(const QString& message, int level, const QDateTime& 
     rotateLogFile();
 
     QString formattedMsg = formatLogMessage(message, level, timestamp, source);
-    m_logStream << formattedMsg << Qt::endl;
+    m_logStream << formattedMsg << endl;
     m_logStream.flush();
 }
 

@@ -70,7 +70,7 @@ QList<QVariant> MapLoader::parseYamlList(const QString& line)
         return list;
     }
 
-    QStringList items = content.split(',', Qt::SkipEmptyParts);
+    QStringList items = content.split(',', QString::SkipEmptyParts);
     for (const QString& item : items) {
         list.append(parseYamlValue(item.trimmed()));
     }
@@ -103,7 +103,7 @@ QImage MapLoader::loadPgm(const QString& pgmPath)
         }
     }
 
-    QStringList sizeParts = line.split(' ', Qt::SkipEmptyParts);
+    QStringList sizeParts = line.split(' ', QString::SkipEmptyParts);
     if (sizeParts.size() < 2) {
         qWarning() << "[MapLoader] 无效的pgm尺寸信息";
         file.close();
