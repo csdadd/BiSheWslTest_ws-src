@@ -29,7 +29,7 @@ def generate_launch_description():
     #If you want to use the DWB algorithm, you can change the input parameters to wheeltec-dwb.yaml
     param_dir = os.path.join(wheeltec_nav_dir, 'param','wheeltec_param')
     param_file = LaunchConfiguration('params', default=os.path.join(
-        param_dir, 'param_mini_mec.yaml'))
+        param_dir, 'param_mini_akm.yaml'))
 
 
     return LaunchDescription([
