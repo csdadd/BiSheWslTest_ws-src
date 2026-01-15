@@ -17,6 +17,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
 find_package(nav2_core REQUIRED)
 find_package(pluginlib REQUIRED)
+find_package(ackermann_msgs REQUIRED)
 
 nav2_package()
 
@@ -42,6 +43,7 @@ set(dependencies
   nav2_costmap_2d
   nav2_core
   pluginlib
+  ackermann_msgs
 )
 
 # plugins
@@ -78,6 +80,17 @@ ament_target_dependencies(nav2_wait_recovery
 # prevent pluginlib from using boost
 target_compile_definitions(nav2_wait_recovery PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
 
+add_library(nav2_three_point_turn_recovery SHARED
+  plugins/three_point_turn.cpp
+)
+
+ament_target_dependencies(nav2_three_point_turn_recovery
+  ${dependencies}
+)
+
+# prevent pluginlib from using boost
+target_compile_definitions(nav2_three_point_turn_recovery PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
+
 pluginlib_export_plugin_description_file(nav2_core recovery_plugin.xml)
 
 # Library
@@ -108,6 +121,7 @@ install(TARGETS ${library_name}
                 nav2_backup_recovery
                 nav2_spin_recovery
                 nav2_wait_recovery
+                nav2_three_point_turn_recovery
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -137,6 +151,7 @@ ament_export_libraries(${library_name}
   nav2_backup_recovery
   nav2_spin_recovery
   nav2_wait_recovery
+  nav2_three_point_turn_recovery
 )
 ament_export_dependencies(${dependencies})
 ament_package()

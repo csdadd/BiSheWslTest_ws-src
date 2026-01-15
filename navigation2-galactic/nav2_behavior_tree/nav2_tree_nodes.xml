@@ -81,6 +81,13 @@
       <input_port name="spin_dist">Spin distance</input_port>
     </Action>
 
+    <Action ID="ThreePointTurn">
+      <input_port name="forward_dist">前进距离（米）</input_port>
+      <input_port name="backward_dist">后退距离（米）</input_port>
+      <input_port name="max_speed">最大速度（m/s）</input_port>
+      <input_port name="max_steering_angle">最大转向角（弧度）</input_port>
+    </Action>
+
     <Action ID="Wait">
       <input_port name="wait_duration">Wait time</input_port>
     </Action>

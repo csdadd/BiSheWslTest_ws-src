@@ -1,0 +1,16 @@
+# ThreePointTurn 三点掉头恢复行为参数配置
+# 专门用于阿克曼转向车型的狭窄空间掉头
+
+three_point_turn_recoveries:
+  ros__parameters:
+    # 阿克曼小车参数
+    wheelbase: 0.5                # 轴距（米），根据车型调整：mini=0.3-0.5, senior/top=0.5-1.0
+    max_steering_angle: 0.5       # 最大转向角（弧度，约28.6度），典型值：0.4-0.8
+
+    # 运动参数
+    min_linear_vel: 0.1           # 最小线速度（m/s），典型值：0.05-0.2
+    linear_acc_lim: 0.5           # 线加速度限制（m/s²），典型值：0.2-1.0
+    steering_angle_velocity: 1.0  # 转向角速度（rad/s），典型值：0.5-2.0
+
+    # 安全参数
+    simulate_ahead_time: 2.0      # 前瞻模拟时间（秒），用于碰撞检测

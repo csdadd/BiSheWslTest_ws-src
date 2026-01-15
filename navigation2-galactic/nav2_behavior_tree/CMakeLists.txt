@@ -66,6 +66,9 @@ list(APPEND plugin_libs nav2_back_up_action_bt_node)
 add_library(nav2_spin_action_bt_node SHARED plugins/action/spin_action.cpp)
 list(APPEND plugin_libs nav2_spin_action_bt_node)
 
+add_library(nav2_three_point_turn_action_bt_node SHARED plugins/action/three_point_turn_action.cpp)
+list(APPEND plugin_libs nav2_three_point_turn_action_bt_node)
+
 add_library(nav2_wait_action_bt_node SHARED plugins/action/wait_action.cpp)
 list(APPEND plugin_libs nav2_wait_action_bt_node)
 

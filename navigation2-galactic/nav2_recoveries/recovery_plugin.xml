@@ -16,4 +16,10 @@
 	    <description></description>
 	  </class>
 	</library>
+
+	<library path="nav2_three_point_turn_recovery">
+	  <class name="nav2_recoveries/ThreePointTurn" type="nav2_recoveries::ThreePointTurn" base_class_type="nav2_core::Recovery">
+	    <description>Three-point turn recovery behavior for Ackermann steering vehicles</description>
+	  </class>
+	</library>
 </class_libraries>

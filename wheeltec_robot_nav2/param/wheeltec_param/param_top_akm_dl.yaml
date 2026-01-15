@@ -104,6 +104,7 @@ bt_navigator:
     - nav2_planner_selector_bt_node                              #选择不同的路径规划器，以满足不同的导航需求。
     - nav2_controller_selector_bt_node                           #选择不同的控制器，以适应不同的运动模式。
     - nav2_goal_checker_selector_bt_node                         #选择导航的目标检查器。
+    - nav2_three_point_turn_action_bt_node                       #三点掉头恢复行为节点。
 
 # bt_navigator参数说明：https://docs.nav2.org/configuration/packages/configuring-bt-navigator.html?highlight=bt_navigator
 
@@ -341,7 +342,7 @@ behavior_server:
     costmap_topic: local_costmap/costmap_raw           #用于在局部代价地图上进行碰撞检查的原始代价地图主题。
     footprint_topic: local_costmap/published_footprint #局部代价地图框架中的足迹主题。
     cycle_frequency: 10.0 #运行行为插件的频率。
-    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"] #插件包括：{“旋转”、“备份”、“前进”、“等待”}
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait", "three_point_turn"] #插件包括：{“旋转”、“备份”、“前进”、“等待”、“三点掉头”}
     spin:
       plugin: "nav2_behaviors/Spin"
     backup:
@@ -350,6 +351,8 @@ behavior_server:
       plugin: "nav2_behaviors/DriveOnHeading"
     wait:
       plugin: "nav2_behaviors/Wait"
+    three_point_turn:
+      plugin: "nav2_behaviors/ThreePointTurn"
     global_frame: odom_combined
     robot_base_frame: base_footprint
     transform_tolerance: 0.1 #TF 变换容差

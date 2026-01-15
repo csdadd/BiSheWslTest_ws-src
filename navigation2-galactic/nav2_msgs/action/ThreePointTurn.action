@@ -1,0 +1,18 @@
+#goal definition
+float32 forward_dist
+float32 backward_dist
+float32 max_speed
+float32 max_steering_angle
+builtin_interfaces/Duration time_allowance
+---
+#result definition
+builtin_interfaces/Duration total_elapsed_time
+uint8 success_phase
+float32 total_distance
+uint8 error_code
+---
+#feedback definition
+uint8 current_phase
+float32 distance_traveled
+float32 current_yaw
+float32 current_steering_angle
