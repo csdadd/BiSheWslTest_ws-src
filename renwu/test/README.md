@@ -18,7 +18,7 @@
 ## 测试文件结构
 
 ```
-RenWu/test/
+renwu/test/
 ├── main.cpp                           # 测试主程序入口
 ├── testmapconverter.h                 # MapConverter 单元测试头文件
 ├── testmapconverter.cpp                # MapConverter 单元测试实现
@@ -635,7 +635,7 @@ RenWu/test/
 
 ```bash
 cd ~/default_WheelTec_ros2
-colcon build --packages-select RenWu --cmake-args -DBUILD_TESTING=ON
+colcon build --packages-select renwu --cmake-args -DBUILD_TESTING=ON
 ```
 
 ### 运行所有测试
@@ -643,14 +643,14 @@ colcon build --packages-select RenWu --cmake-args -DBUILD_TESTING=ON
 ```bash
 cd ~/default_WheelTec_ros2
 source install/setup.bash
-colcon test --packages-select RenWu
+colcon test --packages-select renwu
 ```
 
 ### 运行特定测试
 
 ```bash
-cd ~/default_WheelTec_ros2/build/RenWu
-./RenWu_tests
+cd ~/default_WheelTec_ros2/build/renwu
+./renwu_tests
 ```
 
 ### 查看测试结果
