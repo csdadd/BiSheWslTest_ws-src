@@ -1,0 +1,561 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>800</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MainWindow</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item>
+     <widget class="QGroupBox" name="statusGroupBox">
+      <property name="title">
+       <string>机器人状态信息</string>
+      </property>
+      <layout class="QHBoxLayout" name="statusLayout">
+       <item>
+        <widget class="QGroupBox" name="batteryGroupBox">
+         <property name="title">
+          <string>电池状态</string>
+         </property>
+         <layout class="QVBoxLayout" name="batteryLayout">
+          <item>
+           <layout class="QHBoxLayout" name="voltageLayout">
+            <item>
+             <widget class="QLabel" name="labelVoltageInfo">
+              <property name="text">
+               <string>电压：</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelVoltage">
+              <property name="text">
+               <string>-- V</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="percentageLayout">
+            <item>
+             <widget class="QLabel" name="labelPercentageInfo">
+              <property name="text">
+               <string>电量：</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelPercentage">
+              <property name="text">
+               <string>-- %</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QLabel" name="labelBatteryStatus">
+            <property name="text">
+             <string>状态：未知</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="positionGroupBox">
+         <property name="title">
+          <string>当前位置</string>
+         </property>
+         <layout class="QVBoxLayout" name="positionLayout">
+          <item>
+           <layout class="QHBoxLayout" name="xLayout">
+            <item>
+             <widget class="QLabel" name="labelXInfo">
+              <property name="text">
+               <string>X：</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelX">
+              <property name="text">
+               <string>-- m</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="yLayout">
+            <item>
+             <widget class="QLabel" name="labelYInfo">
+              <property name="text">
+               <string>Y：</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelY">
+              <property name="text">
+               <string>-- m</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="yawLayout">
+            <item>
+             <widget class="QLabel" name="labelYawInfo">
+              <property name="text">
+               <string>Yaw：</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelYaw">
+              <property name="text">
+               <string>-- °</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="timeGroupBox">
+         <property name="title">
+          <string>系统时间</string>
+         </property>
+         <layout class="QVBoxLayout" name="timeLayout">
+          <item>
+           <layout class="QHBoxLayout" name="uptimeLayout">
+            <item>
+             <widget class="QLabel" name="labelUptimeInfo">
+              <property name="text">
+               <string>运行时间：</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelUptime">
+              <property name="text">
+               <string>--:--:--</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="currentTimeLayout">
+            <item>
+             <widget class="QLabel" name="labelCurrentTimeInfo">
+              <property name="text">
+               <string>当前时间：</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelCurrentTime">
+              <property name="text">
+               <string>--</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="statusSpacer">
+         <property name="orientation">
+          <enum>Qt::Horizontal</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>40</width>
+           <height>20</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="mapGroupBox">
+      <property name="title">
+       <string>地图显示</string>
+      </property>
+      <layout class="QVBoxLayout" name="mapLayout">
+       <item>
+        <layout class="QHBoxLayout" name="mapButtonLayout">
+         <item>
+          <widget class="QPushButton" name="loadMapButton">
+           <property name="text">
+            <string>加载地图文件</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnStartNavigation">
+           <property name="text">
+            <string>开始导航</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnCancelNavigation">
+           <property name="text">
+            <string>取消导航</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnClearGoal">
+           <property name="text">
+            <string>清除目标</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="mapButtonSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>40</width>
+             <height>20</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBoxNavigation">
+         <property name="title">
+          <string>导航控制</string>
+         </property>
+         <layout class="QVBoxLayout" name="navigationLayout">
+          <item>
+           <layout class="QHBoxLayout" name="targetPositionLayout">
+            <item>
+             <widget class="QLabel" name="labelTargetInfo">
+              <property name="text">
+               <string>目标位置：</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelTargetPosition">
+              <property name="text">
+               <string>未设置</string>
+              </property>
+              <property name="styleSheet">
+               <string>font-weight: bold;</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="targetPositionSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="navigationStatusLayout">
+            <item>
+             <widget class="QLabel" name="labelNavigationStatusInfo">
+              <property name="text">
+               <string>导航状态：</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLabel" name="labelNavigationStatus">
+              <property name="text">
+               <string>空闲</string>
+              </property>
+              <property name="styleSheet">
+               <string>color: gray;</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="navigationStatusSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="navigationInfoLayout">
+            <item>
+             <layout class="QVBoxLayout" name="distanceLayout">
+              <item>
+               <widget class="QLabel" name="labelDistanceInfo">
+                <property name="text">
+                 <string>剩余距离：</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="labelDistanceRemaining">
+                <property name="text">
+                 <string>-- m</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <layout class="QVBoxLayout" name="timeLayout">
+              <item>
+               <widget class="QLabel" name="labelTimeInfo">
+                <property name="text">
+                 <string>导航时间：</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="labelNavigationTime">
+                <property name="text">
+                 <string>-- s</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <layout class="QVBoxLayout" name="recoveriesLayout">
+              <item>
+               <widget class="QLabel" name="labelRecoveriesInfo">
+                <property name="text">
+                 <string>恢复次数：</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="labelRecoveries">
+                <property name="text">
+                 <string>0</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
+            <item>
+             <spacer name="navigationInfoSpacer">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="filterGroupBox">
+      <property name="title">
+       <string>日志过滤</string>
+      </property>
+      <layout class="QHBoxLayout" name="filterLayout">
+       <item>
+        <widget class="QGroupBox" name="levelGroupBox">
+         <property name="title">
+          <string>级别</string>
+         </property>
+         <layout class="QHBoxLayout" name="levelLayout">
+          <item>
+           <widget class="QCheckBox" name="debugCheckBox">
+            <property name="text">
+             <string>DEBUG</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="infoCheckBox">
+            <property name="text">
+             <string>INFO</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="warningCheckBox">
+            <property name="text">
+             <string>WARNING</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="errorCheckBox">
+            <property name="text">
+             <string>ERROR</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="fatalCheckBox">
+            <property name="text">
+             <string>FATAL</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLineEdit" name="keywordLineEdit">
+         <property name="placeholderText">
+          <string>关键词</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLineEdit" name="sourceLineEdit">
+         <property name="placeholderText">
+          <string>来源节点</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QDateTimeEdit" name="startTimeEdit">
+         <property name="calendarPopup">
+          <bool>true</bool>
+         </property>
+         <property name="displayFormat">
+          <string>yyyy-MM-dd HH:mm:ss</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="toLabel">
+         <property name="text">
+          <string>至</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QDateTimeEdit" name="endTimeEdit">
+         <property name="calendarPopup">
+          <bool>true</bool>
+         </property>
+         <property name="displayFormat">
+          <string>yyyy-MM-dd HH:mm:ss</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="queryButton">
+         <property name="text">
+          <string>查询</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="clearFilterButton">
+         <property name="text">
+          <string>清除过滤</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="refreshButton">
+         <property name="text">
+          <string>刷新</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QTableView" name="logTableView"/>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>800</width>
+     <height>22</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menuUser">
+    <property name="title">
+     <string>用户</string>
+    </property>
+    <addaction name="actionUserManagement"/>
+    <addaction name="actionChangePassword"/>
+    <addaction name="separator"/>
+    <addaction name="actionLogout"/>
+   </widget>
+   <addaction name="menuUser"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="actionUserManagement">
+   <property name="text">
+    <string>用户管理</string>
+   </property>
+  </action>
+  <action name="actionChangePassword">
+   <property name="text">
+    <string>修改密码</string>
+   </property>
+  </action>
+  <action name="actionLogout">
+   <property name="text">
+    <string>注销</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
