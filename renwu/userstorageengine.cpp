@@ -105,8 +105,8 @@ bool UserStorageEngine::initialize(const QString& dbPath)
         )");
 
         User defaultAdmin;
-        defaultAdmin.username = "admin";
-        defaultAdmin.passwordHash = hashPassword("admin123");
+        defaultAdmin.username = "0";
+        defaultAdmin.passwordHash = hashPassword("0");
         defaultAdmin.permission = UserPermission::ADMIN;
         defaultAdmin.createdAt = QDateTime::currentDateTime();
         defaultAdmin.active = true;
@@ -121,7 +121,7 @@ bool UserStorageEngine::initialize(const QString& dbPath)
         if (!insertQuery.exec()) {
             qWarning() << "[UserStorageEngine] 创建默认管理员账户失败:" << insertQuery.lastError().text();
         } else {
-            qDebug() << "[UserStorageEngine] 默认管理员账户已创建 (用户名: admin, 密码: admin123)";
+            qDebug() << "[UserStorageEngine] 默认管理员账户已创建 (用户名: 0, 密码: 0)";
         }
     } else {
         qDebug() << "[UserStorageEngine] 默认管理员账户已存在";

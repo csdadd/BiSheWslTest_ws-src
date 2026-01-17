@@ -1,13 +1,14 @@
 #include "systemmonitorthread.h"
 #include <QDir>
 #include <QCoreApplication>
-#include <QDebug>
 #include <thread>
+#include <QDebug>
 
 SystemMonitorThread::SystemMonitorThread(QObject* parent)
     : BaseThread(parent)
 {
     m_threadName = "SystemMonitorThread";
+    qDebug() << "[SystemMonitorThread] 构造函数";
 }
 
 SystemMonitorThread::~SystemMonitorThread()
@@ -34,6 +35,8 @@ void SystemMonitorThread::initialize()
         }
 
         emit logMessage("SystemMonitorThread initialized successfully", 0);
+
+        qDebug() << "[SystemMonitorThread] 初始化成功";
         emit connectionStateChanged(true);
 
     } catch (const std::exception& e) {
@@ -82,7 +85,12 @@ void SystemMonitorThread::subscribeROSTopics()
 
 void SystemMonitorThread::process()
 {
-    // qDebug() << "[SystemMonitorThread] 正在运行 - 监控ROS日志、碰撞检测和行为树";
+    static int count = 0;
+    count++;
+    if (count >= 100) {
+        qDebug() << "[SystemMonitorThread] 正在运行 - 监控ROS日志、碰撞检测和行为树";
+        count = 0;
+    }
 
     QVector<StorageLogEntry> batchEntries;
     MonitorLogEntry entry;

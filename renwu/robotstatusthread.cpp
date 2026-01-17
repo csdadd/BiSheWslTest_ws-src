@@ -7,6 +7,7 @@ RobotStatusThread::RobotStatusThread(QObject* parent)
     , m_batteryVoltage(0.0f)
 {
     m_threadName = "RobotStatusThread";
+    qDebug() << "[RobotStatusThread] 构造函数";
 }
 
 RobotStatusThread::~RobotStatusThread()
@@ -25,6 +26,7 @@ void RobotStatusThread::initialize()
         subscribeROSTopics();
         m_executor->add_node(m_rosNode);
 
+        qDebug() << "[RobotStatusThread] 初始化成功";
         emit logMessage("RobotStatusThread initialized successfully", 0);
         emit connectionStateChanged(true);
 
@@ -37,6 +39,12 @@ void RobotStatusThread::initialize()
 
 void RobotStatusThread::subscribeROSTopics()
 {
+    if (!m_rosNode) {
+        qCritical() << "[RobotStatusThread] 错误：ROS节点未初始化";
+        emit threadError("ROS node is null, cannot subscribe to topics");
+        return;
+    }
+
     m_batterySub = m_rosNode->create_subscription<std_msgs::msg::Float32>(
         "/PowerVoltage",
         rclcpp::SensorDataQoS(),
@@ -80,7 +88,12 @@ void RobotStatusThread::subscribeROSTopics()
 
 void RobotStatusThread::process()
 {
-    // qDebug() << "[RobotStatusThread] 正在运行 - 获取电池、位置、里程计和诊断信息";
+    static int count = 0;
+    count++;
+    if (count >= 100) {
+        qDebug() << "[RobotStatusThread] 正在运行 - 获取电池、位置、里程计和诊断信息";
+        count = 0;
+    }
     if (m_executor && m_rosNode) {
         m_executor->spin_some();
     }

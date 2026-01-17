@@ -5,11 +5,11 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QFormLayout>
-#include <QMessageBox>
 #include "userauthmanager.h"
+
+namespace Ui {
+class LoginDialog;
+}
 
 class LoginDialog : public QDialog
 {
@@ -28,18 +28,11 @@ private slots:
     void onLoginFailed(const QString& reason);
 
 private:
-    void setupUI();
     void setupConnections();
 
-private:
+    Ui::LoginDialog* ui;
     UserAuthManager* m_authManager;
     User m_currentUser;
-
-    QLineEdit* m_usernameEdit;
-    QLineEdit* m_passwordEdit;
-    QPushButton* m_loginButton;
-    QPushButton* m_cancelButton;
-    QLabel* m_messageLabel;
 };
 
 #endif // LOGINDIALOG_H

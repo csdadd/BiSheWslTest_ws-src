@@ -68,7 +68,12 @@ void LogThread::initialize()
 
 void LogThread::process()
 {
-    // qDebug() << "[LogThread] 正在运行 - 处理日志队列";
+    static int count = 0;
+    count++;
+    if (count >= 100) {
+        qDebug() << "[LogThread] 正在运行 - 处理日志队列";
+        count = 0;
+    }
     processLogQueue();
 }
 

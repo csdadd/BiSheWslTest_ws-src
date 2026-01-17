@@ -19,6 +19,7 @@
 #include "userauthmanager.h"
 #include "logindialog.h"
 #include "usermanagementdialog.h"
+#include "changepassworddialog.h"
 #include "user.h"
 
 QT_BEGIN_NAMESPACE
@@ -52,7 +53,6 @@ private slots:
 
     // NavStatusThread槽函数
     void onNavigationStatusReceived(int status, const QString& message);
-    void onNavigationFeedbackReceived(const QString& feedback);
     void onNavigationPathReceived(const QVector<QPointF>& path);
 
     // SystemMonitorThread槽函数

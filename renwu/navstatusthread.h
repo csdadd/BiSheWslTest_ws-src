@@ -20,7 +20,6 @@ public:
 
 signals:
     void navigationStatusReceived(int status, const QString& message);
-    void navigationFeedbackReceived(const QString& feedback);
     void navigationPathReceived(const QVector<QPointF>& path);
     void connectionStateChanged(bool connected);
 
@@ -32,7 +31,6 @@ protected:
 private:
     void subscribeROSTopics();
     void processNavigationStatus(const action_msgs::msg::GoalStatusArray::SharedPtr msg);
-    void processNavigationFeedback(const typename nav2_msgs::action::NavigateToPose::Feedback::SharedPtr msg);
     void processNavigationPath(const nav_msgs::msg::Path::SharedPtr msg);
 
 private:
@@ -40,7 +38,6 @@ private:
     rclcpp::executors::SingleThreadedExecutor::SharedPtr m_executor;
 
     rclcpp::Subscription<action_msgs::msg::GoalStatusArray>::SharedPtr m_navStatusSub;
-    rclcpp::Subscription<nav2_msgs::action::NavigateToPose::Feedback>::SharedPtr m_navFeedbackSub;
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr m_navPathSub;
 };
 

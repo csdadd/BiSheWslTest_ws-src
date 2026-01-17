@@ -4,6 +4,8 @@
 #include <QtTest/QtTest>
 #include <QTemporaryFile>
 #include <QSignalSpy>
+#include <QPushButton>
+#include <QLineEdit>
 #include "logindialog.h"
 #include "userauthmanager.h"
 #include "userstorageengine.h"

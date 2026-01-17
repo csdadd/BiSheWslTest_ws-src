@@ -66,9 +66,9 @@ private:
     bool m_initialized;
     bool m_loggedIn;
     QString m_lastError;
-    static constexpr int MIN_PASSWORD_LENGTH = 6;
+    static constexpr int MIN_PASSWORD_LENGTH = 1;
     static constexpr int MAX_PASSWORD_LENGTH = 32;
-    static constexpr int MIN_USERNAME_LENGTH = 3;
+    static constexpr int MIN_USERNAME_LENGTH = 1;
     static constexpr int MAX_USERNAME_LENGTH = 20;
 };
 

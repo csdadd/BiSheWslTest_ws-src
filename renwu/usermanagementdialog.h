@@ -3,16 +3,12 @@
 
 #include <QDialog>
 #include <QTableWidget>
-#include <QPushButton>
-#include <QLineEdit>
-#include <QComboBox>
-#include <QLabel>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QHeaderView>
-#include <QMessageBox>
 #include "userauthmanager.h"
 #include "user.h"
+
+namespace Ui {
+class UserManagementDialog;
+}
 
 class UserManagementDialog : public QDialog
 {
@@ -35,23 +31,14 @@ private slots:
     void onErrorOccurred(const QString& error);
 
 private:
-    void setupUI();
     void setupConnections();
     void loadUsers();
     void addUserToTable(const User& user);
     QString permissionToString(UserPermission permission);
     UserPermission stringToPermission(const QString& str);
 
-private:
+    Ui::UserManagementDialog* ui;
     UserAuthManager* m_authManager;
-
-    QTableWidget* m_userTable;
-    QPushButton* m_addUserButton;
-    QPushButton* m_deleteUserButton;
-    QPushButton* m_changePasswordButton;
-    QPushButton* m_refreshButton;
-    QPushButton* m_closeButton;
-    QLabel* m_messageLabel;
 };
 
 #endif // USERMANAGEMENTDIALOG_H

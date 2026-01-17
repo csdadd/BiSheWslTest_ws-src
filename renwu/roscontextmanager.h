@@ -19,6 +19,7 @@ public:
     void shutdown();
 
     rclcpp::Context::SharedPtr getContext() const;
+    rclcpp::Node::SharedPtr getLogger() const;
 
     ROSContextManager(const ROSContextManager&) = delete;
     ROSContextManager& operator=(const ROSContextManager&) = delete;
@@ -29,6 +30,7 @@ private:
 
     std::once_flag m_initFlag;
     rclcpp::Context::SharedPtr m_context;
+    rclcpp::Node::SharedPtr m_loggerNode;
     mutable std::mutex m_mutex;
     std::atomic<bool> m_initialized;
 };

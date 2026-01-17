@@ -6,6 +6,7 @@
 QImage MapConverter::convertToImage(const nav_msgs::msg::OccupancyGrid::SharedPtr& map)
 {
     if (!map) {
+        qWarning() << "[MapConverter] 地图指针为空";
         return QImage();
     }
 
@@ -37,6 +38,8 @@ QImage MapConverter::convertToImage(const nav_msgs::msg::OccupancyGrid::SharedPt
         }
         image.bits()[i] = value;
     }
+
+    qDebug() << "[MapConverter] 地图转换成功 - 尺寸:" << width << "x" << height << "分辨率:" << map->info.resolution;
 
     return image;
 }

@@ -75,17 +75,6 @@ void TestNavStatusThread::testNavigationStatusSignal()
     m_thread->wait();
 }
 
-void TestNavStatusThread::testNavigationFeedbackSignal()
-{
-    QSignalSpy feedbackSpy(m_thread, &NavStatusThread::navigationFeedbackReceived);
-
-    m_thread->start();
-    QThread::msleep(100);
-
-    m_thread->stopThread();
-    m_thread->wait();
-}
-
 void TestNavStatusThread::testNavigationPathSignal()
 {
     QSignalSpy pathSpy(m_thread, &NavStatusThread::navigationPathReceived);

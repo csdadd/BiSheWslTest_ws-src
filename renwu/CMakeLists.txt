@@ -89,8 +89,16 @@ set(PROJECT_SOURCES
         userauthmanager.cpp
         logindialog.h
         logindialog.cpp
+        logindialog.ui
         usermanagementdialog.h
         usermanagementdialog.cpp
+        usermanagementdialog.ui
+        changepassworddialog.h
+        changepassworddialog.cpp
+        changepassworddialog.ui
+        adduserdialog.h
+        adduserdialog.cpp
+        adduserdialog.ui
 )
 
 add_executable(renwu
@@ -243,8 +251,16 @@ if(BUILD_TESTING)
         userauthmanager.cpp
         logindialog.h
         logindialog.cpp
+        logindialog.ui
         usermanagementdialog.h
         usermanagementdialog.cpp
+        usermanagementdialog.ui
+        changepassworddialog.h
+        changepassworddialog.cpp
+        changepassworddialog.ui
+        adduserdialog.h
+        adduserdialog.cpp
+        adduserdialog.ui
     )
 
     add_executable(renwu_tests ${TEST_SOURCES})

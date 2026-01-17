@@ -5,6 +5,7 @@ NavStatusThread::NavStatusThread(QObject* parent)
     : BaseThread(parent)
 {
     m_threadName = "NavStatusThread";
+    qDebug() << "[NavStatusThread] 构造函数";
 }
 
 NavStatusThread::~NavStatusThread()
@@ -23,6 +24,7 @@ void NavStatusThread::initialize()
         subscribeROSTopics();
         m_executor->add_node(m_rosNode);
 
+        qDebug() << "[NavStatusThread] 初始化成功";
         emit logMessage("NavStatusThread initialized successfully", 0);
         emit connectionStateChanged(true);
 
@@ -35,19 +37,17 @@ void NavStatusThread::initialize()
 
 void NavStatusThread::subscribeROSTopics()
 {
+    if (!m_rosNode) {
+        qCritical() << "[NavStatusThread] 错误：ROS节点未初始化";
+        emit threadError("ROS node is null, cannot subscribe to topics");
+        return;
+    }
+
     m_navStatusSub = m_rosNode->create_subscription<action_msgs::msg::GoalStatusArray>(
         "/navigate_to_pose/_action/status",
         rclcpp::SensorDataQoS(),
         [this](const action_msgs::msg::GoalStatusArray::SharedPtr msg) {
             processNavigationStatus(msg);
-        }
-    );
-
-    m_navFeedbackSub = m_rosNode->create_subscription<typename nav2_msgs::action::NavigateToPose::Feedback>(
-        "/navigate_to_pose/_action/feedback",
-        rclcpp::SensorDataQoS(),
-        [this](const typename nav2_msgs::action::NavigateToPose::Feedback::SharedPtr msg) {
-            processNavigationFeedback(msg);
         }
     );
 
@@ -62,7 +62,12 @@ void NavStatusThread::subscribeROSTopics()
 
 void NavStatusThread::process()
 {
-    // qDebug() << "[NavStatusThread] 正在运行 - 获取导航状态、反馈和路径信息";
+    static int count = 0;
+    count++;
+    if (count >= 100) {
+        qDebug() << "[NavStatusThread] 正在运行 - 获取导航状态、反馈和路径信息";
+        count = 0;
+    }
     if (m_executor && m_rosNode) {
         m_executor->spin_some();
     }
@@ -118,20 +123,6 @@ void NavStatusThread::processNavigationStatus(const action_msgs::msg::GoalStatus
     if (!logMsg.isEmpty()) {
         emit logMessage(logMsg, status >= 3 ? 2 : 0);
     }
-}
-
-void NavStatusThread::processNavigationFeedback(const typename nav2_msgs::action::NavigateToPose::Feedback::SharedPtr msg)
-{
-    double currentX = msg->current_pose.pose.position.x;
-    double currentY = msg->current_pose.pose.position.y;
-    double goalX = msg->distance_remaining;
-
-    QString feedback = QString("Navigating... Distance remaining: %1m, Current position: (%2, %3)")
-                           .arg(goalX, 0, 'f', 2)
-                           .arg(currentX, 0, 'f', 2)
-                           .arg(currentY, 0, 'f', 2);
-
-    emit navigationFeedbackReceived(feedback);
 }
 
 void NavStatusThread::processNavigationPath(const nav_msgs::msg::Path::SharedPtr msg)

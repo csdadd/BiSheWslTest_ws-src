@@ -170,8 +170,6 @@ void MainWindow::connectSignals()
     // NavStatusThread信号连接
     connect(m_navStatusThread, &NavStatusThread::navigationStatusReceived,
             this, &MainWindow::onNavigationStatusReceived);
-    connect(m_navStatusThread, &NavStatusThread::navigationFeedbackReceived,
-            this, &MainWindow::onNavigationFeedbackReceived);
     connect(m_navStatusThread, &NavStatusThread::navigationPathReceived,
             this, &MainWindow::onNavigationPathReceived);
     connect(m_navStatusThread, &NavStatusThread::connectionStateChanged,
@@ -460,13 +458,6 @@ void MainWindow::onNavigationStatusReceived(int status, const QString& message)
     ui->statusbar->showMessage(QString("导航: %1 - %2").arg(statusStr).arg(message), 3000);
 }
 
-void MainWindow::onNavigationFeedbackReceived(const QString& feedback)
-{
-    QString message = QString("导航反馈 - %1").arg(feedback);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
-    m_logTableModel->addLogEntry(entry);
-}
-
 void MainWindow::onNavigationPathReceived(const QVector<QPointF>& path)
 {
     QString message = QString("导航路径 - 路径点数: %1").arg(path.size());
@@ -549,16 +540,16 @@ void MainWindow::onConnectionStateChanged(bool connected)
 
 void MainWindow::onThreadStarted(const QString& threadName)
 {
-    // QString message = QString("线程启动 - %1").arg(threadName);
-    // LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
-    // m_logTableModel->addLogEntry(entry);
+    QString message = QString("线程启动 - %1").arg(threadName);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onThreadStopped(const QString& threadName)
 {
-    // QString message = QString("线程停止 - %1").arg(threadName);
-    // LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
-    // m_logTableModel->addLogEntry(entry);
+    QString message = QString("线程停止 - %1").arg(threadName);
+    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
+    m_logTableModel->addLogEntry(entry);
 }
 
 void MainWindow::onThreadError(const QString& error)
@@ -969,69 +960,7 @@ void MainWindow::onUserManagement()
 
 void MainWindow::onChangePassword()
 {
-    QDialog dialog(this);
-    dialog.setWindowTitle("修改密码");
-    dialog.setModal(true);
-    dialog.setFixedSize(350, 250);
-
-    QVBoxLayout* layout = new QVBoxLayout(&dialog);
-
-    QFormLayout* formLayout = new QFormLayout();
-
-    QLineEdit* oldPasswordEdit = new QLineEdit(&dialog);
-    oldPasswordEdit->setPlaceholderText("请输入旧密码");
-    oldPasswordEdit->setEchoMode(QLineEdit::Password);
-    formLayout->addRow("旧密码:", oldPasswordEdit);
-
-    QLineEdit* newPasswordEdit = new QLineEdit(&dialog);
-    newPasswordEdit->setPlaceholderText("请输入新密码");
-    newPasswordEdit->setEchoMode(QLineEdit::Password);
-    formLayout->addRow("新密码:", newPasswordEdit);
-
-    QLineEdit* confirmPasswordEdit = new QLineEdit(&dialog);
-    confirmPasswordEdit->setPlaceholderText("请确认新密码");
-    confirmPasswordEdit->setEchoMode(QLineEdit::Password);
-    formLayout->addRow("确认密码:", confirmPasswordEdit);
-
-    layout->addLayout(formLayout);
-
-    QHBoxLayout* buttonLayout = new QHBoxLayout();
-    QPushButton* okButton = new QPushButton("确定", &dialog);
-    QPushButton* cancelButton = new QPushButton("取消", &dialog);
-    buttonLayout->addWidget(okButton);
-    buttonLayout->addWidget(cancelButton);
-    layout->addLayout(buttonLayout);
-
-    connect(okButton, &QPushButton::clicked, [&]() {
-        QString oldPassword = oldPasswordEdit->text();
-        QString newPassword = newPasswordEdit->text();
-        QString confirmPassword = confirmPasswordEdit->text();
-
-        if (oldPassword.isEmpty()) {
-            QMessageBox::warning(&dialog, "错误", "请输入旧密码");
-            return;
-        }
-
-        if (newPassword.isEmpty()) {
-            QMessageBox::warning(&dialog, "错误", "请输入新密码");
-            return;
-        }
-
-        if (newPassword != confirmPassword) {
-            QMessageBox::warning(&dialog, "错误", "两次输入的密码不一致");
-            return;
-        }
-
-        if (m_userAuthManager->changePassword(oldPassword, newPassword)) {
-            QMessageBox::information(&dialog, "成功", "密码修改成功");
-            dialog.accept();
-        } else {
-            QMessageBox::critical(&dialog, "错误", m_userAuthManager->getLastError());
-        }
-    });
-
-    connect(cancelButton, &QPushButton::clicked, &dialog, &QDialog::reject);
-
+    ChangePasswordDialog dialog(ChangePasswordDialog::Mode::SelfChange, m_userAuthManager, "", this);
     dialog.exec();
 }
 

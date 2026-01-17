@@ -2,14 +2,15 @@
 #include "roscontextmanager.h"
 #include <cmath>
 #include <QtConcurrent>
-#include <QDebug>
 #include <thread>
+#include <QDebug>
 
 InfoThread::InfoThread(QObject* parent)
     : BaseThread(parent)
     , m_batteryVoltage(0.0f)
 {
     m_threadName = "InfoThread";
+    qDebug() << "[InfoThread] 构造函数";
 }
 
 InfoThread::~InfoThread()
@@ -32,6 +33,7 @@ void InfoThread::initialize()
 
         m_startTime = QDateTime::currentDateTime();
 
+        qDebug() << "[InfoThread] 初始化成功";
         emit logMessage("InfoThread initialized successfully", 0);
         emit connectionStateChanged(true);
 
@@ -46,6 +48,12 @@ void InfoThread::initialize()
 
 void InfoThread::subscribeROSTopics()
 {
+    if (!m_rosNode) {
+        qCritical() << "[InfoThread] 错误：ROS节点未初始化";
+        emit threadError("ROS node is null, cannot subscribe to topics");
+        return;
+    }
+
     m_batterySub = m_rosNode->create_subscription<std_msgs::msg::Float32>(
         "/PowerVoltage",
         rclcpp::SensorDataQoS(),
@@ -113,7 +121,12 @@ void InfoThread::subscribeROSTopics()
 
 void InfoThread::process()
 {
-    // qDebug() << "[InfoThread] 正在运行 - 处理ROS话题订阅";
+    static int count = 0;
+    count++;
+    if (count >= 100) {
+        qDebug() << "[InfoThread] 正在运行 - 处理ROS话题订阅";
+        count = 0;
+    }
 
     QString currentTime = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
     emit systemTimeReceived(currentTime);
@@ -123,7 +136,6 @@ void InfoThread::cleanup()
 {
     m_executor.reset();
     m_rosNode.reset();
-    rclcpp::shutdown();
 
     emit connectionStateChanged(false);
     emit logMessage("InfoThread cleanup completed", 0);

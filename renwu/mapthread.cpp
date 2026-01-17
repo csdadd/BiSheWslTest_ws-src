@@ -7,11 +7,10 @@ MapThread::MapThread(QObject* parent)
     , m_originX(0.0)
     , m_originY(0.0)
     , m_mapReceived(false)
-    , m_updateTimer(nullptr)
-    , m_reconnectTimer(nullptr)
     , m_reconnectCount(0)
 {
     m_threadName = "MapThread";
+    qDebug() << "[MapThread] 构造函数";
 }
 
 MapThread::~MapThread()
@@ -39,12 +38,12 @@ void MapThread::initialize()
     m_reconnectCount = 0;
     emit connectionStateChanged(true);
 
-    m_updateTimer = new QTimer(this);
+    m_updateTimer = new QTimer();
     m_updateTimer->setInterval(250);
     connect(m_updateTimer, &QTimer::timeout, this, &MapThread::emitMapUpdate);
     m_updateTimer->start();
 
-    m_reconnectTimer = new QTimer(this);
+    m_reconnectTimer = new QTimer();
     m_reconnectTimer->setInterval(5000);
     connect(m_reconnectTimer, &QTimer::timeout, this, &MapThread::attemptReconnect);
 }

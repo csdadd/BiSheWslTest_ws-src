@@ -46,8 +46,8 @@ private:
     double m_originX;
     double m_originY;
     bool m_mapReceived;
-    QTimer* m_updateTimer;
-    QTimer* m_reconnectTimer;
+    QTimer* m_updateTimer = nullptr;
+    QTimer* m_reconnectTimer = nullptr;
     int m_reconnectCount;
     static const int MAX_RECONNECT_ATTEMPTS = 10;
 };

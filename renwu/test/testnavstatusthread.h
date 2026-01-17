@@ -20,7 +20,6 @@ private slots:
     void testStart();
     void testStop();
     void testNavigationStatusSignal();
-    void testNavigationFeedbackSignal();
     void testNavigationPathSignal();
     void testConnectionStateSignal();
     void testThreadLifecycle();

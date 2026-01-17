@@ -8,6 +8,9 @@ int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
 
+    // 启用统一的日志输出格式，确保 Release 模式下也能看到调试信息
+    qSetMessagePattern("[%{time yyyy-MM-dd hh:mm:ss.zzz}] [%{type}] %{message}");
+
     qDebug() << "[Main] 正在创建主界面...";
 
     MainWindow w;
