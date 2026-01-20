@@ -158,21 +158,9 @@ void RobotStatusThread::processOdometryData(const nav_msgs::msg::Odometry::Share
 
 void RobotStatusThread::processDiagnosticsData(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg)
 {
-    static bool firstDiagnostics = true;
-    
     if (msg->status.empty()) {
-        if (firstDiagnostics) {
-            emit diagnosticsReceived("System", 0, "系统初始化中 - 等待诊断数据...");
-            firstDiagnostics = false;
-        } else {
-            emit diagnosticsReceived("System", 0, "暂无诊断数据 - 系统正常运行");
-        }
+        emit diagnosticsReceived("Unknown", 0, "No status available");
         return;
-    }
-    
-    if (firstDiagnostics) {
-        emit diagnosticsReceived("System", 0, "系统初始化完成 - 诊断数据已接收");
-        firstDiagnostics = false;
     }
 
     for (const auto& status : msg->status) {

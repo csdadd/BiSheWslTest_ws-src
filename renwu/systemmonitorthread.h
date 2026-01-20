@@ -66,7 +66,6 @@ private:
     rclcpp::Node::SharedPtr m_rosNode;
     rclcpp::executors::SingleThreadedExecutor::SharedPtr m_executor;
 
-    rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr m_rosoutSub;
     rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr m_rosoutAggSub;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr m_collisionSub;
     rclcpp::Subscription<nav2_msgs::msg::BehaviorTreeLog>::SharedPtr m_behaviorTreeSub;

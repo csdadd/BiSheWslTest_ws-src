@@ -19,8 +19,6 @@ SystemMonitorThread::~SystemMonitorThread()
 void SystemMonitorThread::initialize()
 {
     try {
-        emit logMessage("系统初始化中...", 0);
-        
         ROSContextManager::instance().initialize();
 
         m_rosNode = std::make_shared<rclcpp::Node>("system_monitor_node");
@@ -36,8 +34,7 @@ void SystemMonitorThread::initialize()
             emit threadError(QString("Failed to initialize LogStorageEngine: %1").arg(m_storageEngine->getLastError()));
         }
 
-        emit logMessage("SystemMonitorThread 初始化成功", 0);
-        emit logMessage("系统监控已启动 - 开始收集日志和诊断信息", 0);
+        emit logMessage("SystemMonitorThread initialized successfully", 0);
 
         qDebug() << "[SystemMonitorThread] 初始化成功";
         emit connectionStateChanged(true);
@@ -129,12 +126,6 @@ void SystemMonitorThread::processROSLog(const rcl_interfaces::msg::Log::SharedPt
     QString message = QString::fromStdString(msg->msg);
     QString source = QString::fromStdString(msg->name);
     int level = MONITOR_LOG_INFO;
-
-    if (source.contains("diagnostic") || 
-        message.contains("diagnostic") ||
-        message.contains("No status available")) {
-        return;
-    }
 
     switch (msg->level) {
         case rcl_interfaces::msg::Log::DEBUG:
