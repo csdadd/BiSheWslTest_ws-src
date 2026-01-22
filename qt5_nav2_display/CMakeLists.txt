@@ -7,6 +7,7 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -42,12 +43,17 @@ target_link_libraries(nav2_view
 
 ament_target_dependencies(nav2_view
   rclcpp
+  ament_index_cpp
   nav_msgs
   geometry_msgs
 )
 
 install(TARGETS nav2_view
   DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY map
+  DESTINATION share/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)

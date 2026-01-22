@@ -3,6 +3,7 @@
 #include <memory>
 #include <thread>
 #include <rclcpp/rclcpp.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include "qt5_nav2_display/nav2_view_widget.hpp"
 
 int main(int argc, char** argv) {
@@ -10,7 +11,7 @@ int main(int argc, char** argv) {
 
     QApplication app(argc, argv);
 
-    std::string map_yaml_path = "/home/w20/default_WheelTec_ros2/src/wheeltec_robot_nav2/map/WHEELTEC.yaml";
+    std::string map_yaml_path = ament_index_cpp::get_package_share_directory("qt5_nav2_display") + "/map/WHEELTEC.yaml";
     if (argc > 1) {
         map_yaml_path = argv[1];
     }
