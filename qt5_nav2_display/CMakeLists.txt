@@ -26,37 +26,32 @@ set(CMAKE_AUTORCC ON)
 # Include directories
 include_directories(include)
 
-# Nav2ViewWidget library
-add_library(nav2_view_widget_src
+# Executable
+add_executable(nav2_view
+  src/main.cpp
   src/nav2_view_widget.cpp
+  include/qt5_nav2_display/nav2_view_widget.hpp
 )
 
-target_include_directories(nav2_view_widget_src PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
-
-target_link_libraries(nav2_view_widget_src
+target_link_libraries(nav2_view
   Qt5::Widgets
   Qt5::Gui
   Qt5::Core
   yaml-cpp
 )
 
-ament_target_dependencies(nav2_view_widget_src
+ament_target_dependencies(nav2_view
   rclcpp
   nav_msgs
   geometry_msgs
 )
 
+install(TARGETS nav2_view
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # uncomment the line when a copyright and license is not present in all source files
-  #set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # uncomment the line when this package is not in a git repo
-  #set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
 

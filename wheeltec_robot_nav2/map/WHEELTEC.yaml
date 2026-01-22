@@ -1,4 +1,4 @@
-image: /home/wheeltec/wheeltec_ros2/src/wheeltec_robot_nav2/map/WHEELTEC.pgm
+image: WHEELTEC.pgm
 mode: trinary
 resolution: 0.05
 origin: [-10, -10, 0]
