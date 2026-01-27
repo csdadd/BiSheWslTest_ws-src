@@ -13,6 +13,7 @@
 #include "mapthread.h"
 #include "mapwidget.h"
 #include "mapcache.h"
+#include "nav2viewwidget.h"
 #include "navigationactionclient.h"
 #include "pathvisualizer.h"
 #include "userstorageengine.h"
@@ -34,13 +35,6 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-    void queryLogsAsync(const QDateTime& startTime = QDateTime(),
-                       const QDateTime& endTime = QDateTime(),
-                       int minLevel = -1,
-                       const QString& source = QString(),
-                       const QString& keyword = QString(),
-                       int limit = -1,
-                       int offset = 0);
 
 private slots:
     // RobotStatusThread槽函数
@@ -70,15 +64,8 @@ private slots:
     void onThreadStopped(const QString& threadName);
     void onThreadError(const QString& error);
 
-    // 日志查询槽函数
-    void onQueryCompleted(const QVector<StorageLogEntry>& results);
-    void onQueryFailed(const QString& error);
-
     // 日志过滤槽函数
     void onFilterChanged();
-    void onQueryButtonClicked();
-    void onClearFilterButtonClicked();
-    void onRefreshButtonClicked();
 
     // 地图相关槽函数
     void onMapReceived(const QImage& mapImage, double resolution, double originX, double originY);
@@ -108,6 +95,8 @@ private:
     void connectSignals();
     void startAllThreads();
     void stopAllThreads();
+    Q_INVOKABLE void refreshLogDisplay(bool autoScroll = true);
+    Q_INVOKABLE bool shouldDisplayLog(int level) const;
 
 private:
     Ui::MainWindow *ui;
@@ -118,9 +107,10 @@ private:
     LogThread* m_logThread;
     LogTableModel* m_logTableModel;
     LogFilterProxyModel* m_logFilterProxyModel;
-    QThreadPool* m_threadPool;
+    QList<LogEntry> m_allLogs;
     MapThread* m_mapThread;
-    MapWidget* m_mapWidget;
+    Nav2ViewWidget* m_nav2ViewWidget;
+    // MapWidget* m_mapWidget;  // 保留备份
     MapCache* m_mapCache;
     NavigationActionClient* m_navigationClient;
     PathVisualizer* m_pathVisualizer;

@@ -9,6 +9,7 @@
 #include "maploader.h"
 #include "mapconverter.h"
 #include "mapmarker.h"
+#include "roscontextmanager.h"
 #include <nav_msgs/msg/path.hpp>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -21,7 +22,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_logTableModel(nullptr)
     , m_logFilterProxyModel(nullptr)
     , m_mapThread(nullptr)
-    , m_mapWidget(nullptr)
+    , m_nav2ViewWidget(nullptr)
+    // , m_mapWidget(nullptr)  // 保留备份
     , m_mapCache(nullptr)
     , m_navigationClient(nullptr)
     , m_pathVisualizer(nullptr)
@@ -95,19 +97,23 @@ MainWindow::MainWindow(QWidget *parent)
     ui->logTableView->setColumnWidth(2, 120);
     ui->logTableView->horizontalHeader()->setStretchLastSection(true);
 
-    m_threadPool = new QThreadPool(this);
-    m_threadPool->setMaxThreadCount(2);
+    // 初始化 ROS2 上下文
+    ROSContextManager::instance().initialize();
 
-    ui->startTimeEdit->setDateTime(QDateTime::currentDateTime().addDays(-1));
-    ui->endTimeEdit->setDateTime(QDateTime::currentDateTime());
+    // 创建 Nav2ViewWidget
+    std::string map_path = "/home/w/wheeltec_ros2/src/renwu/map/WHEELTEC.yaml";
+    auto node = std::make_shared<rclcpp::Node>("nav2_view_node");
+    m_nav2ViewWidget = new Nav2ViewWidget(map_path, node, this);
+    ui->nav2MapLayout->addWidget(m_nav2ViewWidget);
 
-    m_mapWidget = new MapWidget(this);
-    ui->mapLayout->addWidget(m_mapWidget);
+    // m_mapWidget = new MapWidget(this);
+    // ui->mapLayout->addWidget(m_mapWidget);  // 保留备份
 
     m_mapCache = new MapCache(10, this);
 
     m_navigationClient = new NavigationActionClient(this);
-    m_pathVisualizer = new PathVisualizer(m_mapWidget->scene(), this);
+    // m_pathVisualizer = new PathVisualizer(m_mapWidget->scene(), this);  // 保留备份
+    m_pathVisualizer = nullptr;  // Nav2ViewWidget 内部处理路径显示
 
     QTimer* currentTimeTimer = new QTimer(this);
     connect(currentTimeTimer, &QTimer::timeout, this, &MainWindow::updateCurrentTime);
@@ -129,10 +135,11 @@ MainWindow::~MainWindow()
     delete m_systemMonitorThread;
     delete m_logThread;
     delete m_mapThread;
-    delete m_mapWidget;
+    delete m_nav2ViewWidget;
+    // delete m_mapWidget;  // 保留备份
     delete m_mapCache;
     delete m_navigationClient;
-    delete m_pathVisualizer;
+    // delete m_pathVisualizer;  // 现在为 nullptr
     delete ui;
 }
 
@@ -216,17 +223,17 @@ void MainWindow::connectSignals()
     connect(m_mapThread, &MapThread::connectionStateChanged,
             this, &MainWindow::onMapConnectionStateChanged);
 
-    // RobotStatusThread -> MapWidget
-    connect(m_robotStatusThread, &RobotStatusThread::positionReceived,
-            this, [this](double x, double y, double yaw) {
-                if (m_mapWidget) {
-                    m_mapWidget->updateRobotPose(x, y, yaw);
-                }
-            });
+    // RobotStatusThread -> MapWidget (保留备份)
+    // connect(m_robotStatusThread, &RobotStatusThread::positionReceived,
+    //         this, [this](double x, double y, double yaw) {
+    //             if (m_mapWidget) {
+    //                 m_mapWidget->updateRobotPose(x, y, yaw);
+    //             }
+    //         });
 
-    // MapWidget -> MainWindow
-    connect(m_mapWidget, &MapWidget::mapClicked,
-            this, &MainWindow::onMapClicked);
+    // MapWidget -> MainWindow (保留备份)
+    // connect(m_mapWidget, &MapWidget::mapClicked,
+    //         this, &MainWindow::onMapClicked);
 
     // 线程状态信号连接
     connect(m_robotStatusThread, &RobotStatusThread::threadStarted,
@@ -270,16 +277,8 @@ void MainWindow::connectSignals()
     connect(ui->warningCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
     connect(ui->errorCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
     connect(ui->fatalCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
-    connect(ui->keywordLineEdit, &QLineEdit::textChanged, this, &MainWindow::onFilterChanged);
-    connect(ui->sourceLineEdit, &QLineEdit::textChanged, this, &MainWindow::onFilterChanged);
-    connect(ui->startTimeEdit, &QDateTimeEdit::dateTimeChanged, this, &MainWindow::onFilterChanged);
-    connect(ui->endTimeEdit, &QDateTimeEdit::dateTimeChanged, this, &MainWindow::onFilterChanged);
 
     // 连接按钮信号
-    connect(ui->queryButton, &QPushButton::clicked, this, &MainWindow::onQueryButtonClicked);
-    connect(ui->clearFilterButton, &QPushButton::clicked, this, &MainWindow::onClearFilterButtonClicked);
-    connect(ui->refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshButtonClicked);
-    connect(ui->loadMapButton, &QPushButton::clicked, this, &MainWindow::onLoadMapFromFile);
     connect(ui->btnStartNavigation, &QPushButton::clicked, this, &MainWindow::onStartNavigation);
     connect(ui->btnCancelNavigation, &QPushButton::clicked, this, &MainWindow::onCancelNavigation);
     connect(ui->btnClearGoal, &QPushButton::clicked, this, &MainWindow::onClearGoal);
@@ -300,6 +299,16 @@ void MainWindow::connectSignals()
             this, &MainWindow::onNavigationResult);
     connect(m_navigationClient, &NavigationActionClient::goalCanceled,
             this, &MainWindow::onGoalCanceled);
+
+    // Nav2ViewWidget信号连接
+    connect(m_nav2ViewWidget, &Nav2ViewWidget::goalPosePreview,
+            this, [this](double x, double y, double yaw) {
+                m_targetX = x;
+                m_targetY = y;
+                m_targetYaw = yaw;
+                m_hasTarget = true;
+                ui->labelTargetPosition->setText(QString("(%1, %2)").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2));
+            });
 }
 
 void MainWindow::startAllThreads()
@@ -381,7 +390,11 @@ void MainWindow::onBatteryStatusReceived(float voltage, float percentage)
 
     QString message = QString("电池状态 - 电压: %1 V, 电量: %2%").arg(voltage, 0, 'f', 2).arg(percentage, 0, 'f', 1);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Battery");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onPositionReceived(double x, double y, double yaw)
@@ -394,7 +407,11 @@ void MainWindow::onPositionReceived(double x, double y, double yaw)
 
     QString message = QString("位置信息 - X: %1, Y: %2, Yaw: %3").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Position");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, double vy, double omega)
@@ -402,7 +419,7 @@ void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, d
     if (ui->labelX->text() == "-- m") {
         ui->labelX->setText(QString("%1 m").arg(x, 0, 'f', 3));
         ui->labelY->setText(QString("%1 m").arg(y, 0, 'f', 3));
-        
+
         double yaw_degrees = yaw * 180.0 / M_PI;
         ui->labelYaw->setText(QString("%1 °").arg(yaw_degrees, 0, 'f', 1));
     }
@@ -411,7 +428,11 @@ void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, d
         .arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2)
         .arg(vx, 0, 'f', 2).arg(vy, 0, 'f', 2).arg(omega, 0, 'f', 2);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Odometry");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onSystemTimeReceived(const QString& time)
@@ -430,7 +451,11 @@ void MainWindow::onDiagnosticsReceived(const QString& status, int level, const Q
 
     QString logMessage = QString("诊断信息 - 状态: %1, 消息: %2").arg(status).arg(message);
     LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "RobotStatus", "Diagnostics");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(logLevel)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 
     if (level >= 2) {
         ui->statusbar->showMessage(QString("诊断警告: %1").arg(message), 5000);
@@ -453,7 +478,11 @@ void MainWindow::onNavigationStatusReceived(int status, const QString& message)
 
     QString logMessage = QString("导航状态 - %1: %2").arg(statusStr).arg(message);
     LogEntry entry(logMessage, LOG_INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 
     ui->statusbar->showMessage(QString("导航: %1 - %2").arg(statusStr).arg(message), 3000);
 }
@@ -462,26 +491,31 @@ void MainWindow::onNavigationPathReceived(const QVector<QPointF>& path)
 {
     QString message = QString("导航路径 - 路径点数: %1").arg(path.size());
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
-    m_logTableModel->addLogEntry(entry);
-
-    if (m_pathVisualizer && m_mapWidget) {
-        nav_msgs::msg::Path rosPath;
-        rosPath.poses.reserve(path.size());
-        
-        for (const QPointF& point : path) {
-            geometry_msgs::msg::PoseStamped pose;
-            pose.header.frame_id = "map";
-            pose.pose.position.x = point.x();
-            pose.pose.position.y = point.y();
-            pose.pose.position.z = 0.0;
-            rosPath.poses.push_back(pose);
-        }
-
-        double resolution = 0.05;
-        double originX = 0.0;
-        double originY = 0.0;
-        m_pathVisualizer->updatePath(rosPath, resolution, QPointF(originX, originY));
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
     }
+
+    // Nav2ViewWidget 内部订阅 /plan 话题处理路径显示
+    // if (m_pathVisualizer && m_mapWidget) {
+    //     nav_msgs::msg::Path rosPath;
+    //     rosPath.poses.reserve(path.size());
+    //
+    //     for (const QPointF& point : path) {
+    //         geometry_msgs::msg::PoseStamped pose;
+    //         pose.header.frame_id = "map";
+    //         pose.pose.position.x = point.x();
+    //         pose.pose.position.y = point.y();
+    //         pose.pose.position.z = 0.0;
+    //         rosPath.poses.push_back(pose);
+    //     }
+    //
+    //     double resolution = 0.05;
+    //     double originX = 0.0;
+    //     double originY = 0.0;
+    //     m_pathVisualizer->updatePath(rosPath, resolution, QPointF(originX, originY));
+    // }
 }
 
 // ==================== SystemMonitorThread槽函数 ====================
@@ -489,14 +523,26 @@ void MainWindow::onNavigationPathReceived(const QVector<QPointF>& path)
 void MainWindow::onLogMessageReceived(const QString& message, int level, const QDateTime& timestamp)
 {
     LogEntry entry(message, level, timestamp, "SystemMonitor", "ROS");
-    m_logTableModel->addLogEntry(entry);
+
+    // 1. 添加到 allLogs 完整列表
+    m_allLogs.append(entry);
+
+    // 2. 根据当前勾选的级别，判断是否添加到显示列表
+    if (shouldDisplayLog(level)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onCollisionDetected(const QString& message)
 {
     QString logMessage = QString("碰撞检测 - %1").arg(message);
     LogEntry entry(logMessage, LOG_ERROR, QDateTime::currentDateTime(), "SystemMonitor", "Collision");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_ERROR)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 
     ui->statusbar->showMessage(QString("警告: %1").arg(message), 5000);
 }
@@ -505,7 +551,11 @@ void MainWindow::onAnomalyDetected(const QString& message)
 {
     QString logMessage = QString("异常检测 - %1").arg(message);
     LogEntry entry(logMessage, LOG_WARNING, QDateTime::currentDateTime(), "SystemMonitor", "Anomaly");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_WARNING)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 
     ui->statusbar->showMessage(QString("异常: %1").arg(message), 5000);
 }
@@ -514,7 +564,11 @@ void MainWindow::onBehaviorTreeLogReceived(const QString& log)
 {
     QString message = QString("行为树日志 - %1").arg(log);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "SystemMonitor", "BehaviorTree");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 // ==================== LogThread槽函数 ====================
@@ -523,7 +577,11 @@ void MainWindow::onLogFileChanged(const QString& filePath)
 {
     QString message = QString("日志文件变更 - 新文件: %1").arg(filePath);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "LogThread", "File");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 // ==================== 线程状态槽函数 ====================
@@ -534,22 +592,35 @@ void MainWindow::onConnectionStateChanged(bool connected)
     ui->statusbar->showMessage(QString("ROS连接状态: %1").arg(status), 3000);
 
     QString message = QString("连接状态变更 - %1").arg(status);
-    LogEntry entry(message, connected ? LOG_INFO : LOG_WARNING, QDateTime::currentDateTime(), "System", "Connection");
-    m_logTableModel->addLogEntry(entry);
+    int logLevel = connected ? LOG_INFO : LOG_WARNING;
+    LogEntry entry(message, logLevel, QDateTime::currentDateTime(), "System", "Connection");
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(logLevel)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onThreadStarted(const QString& threadName)
 {
     QString message = QString("线程启动 - %1").arg(threadName);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onThreadStopped(const QString& threadName)
 {
     QString message = QString("线程停止 - %1").arg(threadName);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onThreadError(const QString& error)
@@ -563,162 +634,103 @@ void MainWindow::onThreadError(const QString& error)
     QMessageBox::critical(this, "线程错误", QString("发生线程错误:\n\n%1\n\n请检查日志获取详细信息。").arg(error));
 }
 
-// ==================== 日志查询方法 ====================
-
-void MainWindow::queryLogsAsync(const QDateTime& startTime,
-                               const QDateTime& endTime,
-                               int minLevel,
-                               const QString& source,
-                               const QString& keyword,
-                               int limit,
-                               int offset)
-{
-    if (!m_logThread || !m_logThread->getStorageEngine()) {
-        qWarning() << "[MainWindow] LogThread or StorageEngine is null";
-        return;
-    }
-
-    LogStorageEngine* engine = m_logThread->getStorageEngine();
-    if (!engine->isInitialized()) {
-        qWarning() << "[MainWindow] StorageEngine is not initialized";
-        return;
-    }
-
-    LogQueryTask* task = new LogQueryTask(engine, startTime, endTime, minLevel, source, keyword, limit, offset);
-
-    connect(task, &LogQueryTask::queryCompleted, this, &MainWindow::onQueryCompleted, Qt::QueuedConnection);
-    connect(task, &LogQueryTask::queryFailed, this, &MainWindow::onQueryFailed, Qt::QueuedConnection);
-
-    m_threadPool->start(task);
-
-    qDebug() << "[MainWindow] Async query started";
-}
-
-void MainWindow::onQueryCompleted(const QVector<StorageLogEntry>& results)
-{
-    qDebug() << "[MainWindow] Query completed, received" << results.size() << "logs";
-
-    QVector<LogEntry> entries;
-    entries.reserve(results.size());
-
-    for (const auto& storageEntry : results) {
-        LogEntry entry;
-        entry.message = storageEntry.message;
-        entry.level = storageEntry.level;
-        entry.timestamp = storageEntry.timestamp;
-        entry.source = storageEntry.source;
-        entry.category = storageEntry.category;
-        entries.append(entry);
-    }
-
-    m_logTableModel->clearLogs();
-    m_logTableModel->addLogEntries(entries);
-
-    ui->statusbar->showMessage(QString("查询完成: 找到 %1 条日志").arg(results.size()), 3000);
-}
-
-void MainWindow::onQueryFailed(const QString& error)
-{
-    qWarning() << "[MainWindow] Query failed:" << error;
-
-    QString message = QString("查询失败 - %1").arg(error);
-    LogEntry entry(message, LOG_ERROR, QDateTime::currentDateTime(), "MainWindow", "Query");
-    m_logTableModel->addLogEntry(entry);
-
-    ui->statusbar->showMessage(QString("查询失败: %1").arg(error), 5000);
-
-    QMessageBox::warning(this, "查询失败", QString("日志查询失败:\n\n%1\n\n请检查数据库连接和查询参数。").arg(error));
-}
-
 void MainWindow::onFilterChanged()
 {
-    QSet<int> levels;
-    if (ui->debugCheckBox->isChecked()) levels.insert(LOG_DEBUG);
-    if (ui->infoCheckBox->isChecked()) levels.insert(LOG_INFO);
-    if (ui->warningCheckBox->isChecked()) levels.insert(LOG_WARNING);
-    if (ui->errorCheckBox->isChecked()) levels.insert(LOG_ERROR);
-    if (ui->fatalCheckBox->isChecked()) levels.insert(LOG_FATAL);
-
-    m_logFilterProxyModel->setLogLevelFilter(levels);
-    m_logFilterProxyModel->setKeywordFilter(ui->keywordLineEdit->text());
-    m_logFilterProxyModel->setSourceFilter(ui->sourceLineEdit->text());
-    m_logFilterProxyModel->setTimeRangeFilter(ui->startTimeEdit->dateTime(), ui->endTimeEdit->dateTime());
+    refreshLogDisplay(false);  // 手动过滤不自动滚动
 }
 
-void MainWindow::onQueryButtonClicked()
+void MainWindow::refreshLogDisplay(bool autoScroll)
 {
-    QDateTime startTime = ui->startTimeEdit->dateTime();
-    QDateTime endTime = ui->endTimeEdit->dateTime();
+    // 获取当前勾选的日志级别
+    QSet<int> enabledLevels;
+    if (ui->debugCheckBox->isChecked()) enabledLevels << LOG_DEBUG;
+    if (ui->infoCheckBox->isChecked()) enabledLevels << LOG_INFO;
+    if (ui->warningCheckBox->isChecked()) enabledLevels << LOG_WARNING;
+    if (ui->errorCheckBox->isChecked()) enabledLevels << LOG_ERROR;
+    if (ui->fatalCheckBox->isChecked()) enabledLevels << LOG_FATAL;
 
-    QSet<int> levels;
-    if (ui->debugCheckBox->isChecked()) levels.insert(LOG_DEBUG);
-    if (ui->infoCheckBox->isChecked()) levels.insert(LOG_INFO);
-    if (ui->warningCheckBox->isChecked()) levels.insert(LOG_WARNING);
-    if (ui->errorCheckBox->isChecked()) levels.insert(LOG_ERROR);
-    if (ui->fatalCheckBox->isChecked()) levels.insert(LOG_FATAL);
+    // 清空当前显示
+    m_logTableModel->clearLogs();
 
-    int minLevel = levels.isEmpty() ? -1 : *std::min_element(levels.begin(), levels.end());
-    QString source = ui->sourceLineEdit->text();
-    QString keyword = ui->keywordLineEdit->text();
+    // 从 allLogs 中筛选符合条件的日志
+    QVector<LogEntry> filteredLogs;
+    for (const auto& log : m_allLogs) {
+        if (enabledLevels.contains(log.level)) {
+            filteredLogs.append(log);
+        }
+    }
 
-    queryLogsAsync(startTime, endTime, minLevel, source, keyword);
+    if (!filteredLogs.isEmpty()) {
+        m_logTableModel->addLogEntries(filteredLogs);
+    }
+
+    if (autoScroll) {
+        ui->logTableView->scrollToBottom();
+    }
 }
 
-void MainWindow::onClearFilterButtonClicked()
+bool MainWindow::shouldDisplayLog(int level) const
 {
-    ui->debugCheckBox->setChecked(false);
-    ui->infoCheckBox->setChecked(false);
-    ui->warningCheckBox->setChecked(false);
-    ui->errorCheckBox->setChecked(false);
-    ui->fatalCheckBox->setChecked(false);
-    ui->keywordLineEdit->clear();
-    ui->sourceLineEdit->clear();
-    ui->startTimeEdit->setDateTime(QDateTime::currentDateTime().addDays(-1));
-    ui->endTimeEdit->setDateTime(QDateTime::currentDateTime());
-
-    m_logFilterProxyModel->clearAllFilters();
-}
-
-void MainWindow::onRefreshButtonClicked()
-{
-    queryLogsAsync(QDateTime(), QDateTime(), -1, QString(), QString());
+    switch (level) {
+        case LOG_DEBUG:   return ui->debugCheckBox->isChecked();
+        case LOG_INFO:    return ui->infoCheckBox->isChecked();
+        case LOG_WARNING: return ui->warningCheckBox->isChecked();
+        case LOG_ERROR:   return ui->errorCheckBox->isChecked();
+        case LOG_FATAL:   return ui->fatalCheckBox->isChecked();
+        default:          return false;
+    }
 }
 
 // ==================== 地图相关槽函数 ====================
 
 void MainWindow::onMapReceived(const QImage& mapImage, double resolution, double originX, double originY)
 {
-    if (m_mapWidget) {
-        m_mapWidget->setMapImage(mapImage, resolution, originX, originY);
-    }
+    // Nav2ViewWidget 从 YAML 文件加载地图，不需要处理 /map 话题
+    // if (m_mapWidget) {
+    //     m_mapWidget->setMapImage(mapImage, resolution, originX, originY);
+    // }
+    Q_UNUSED(mapImage)
+    Q_UNUSED(resolution)
+    Q_UNUSED(originX)
+    Q_UNUSED(originY)
 }
 
 void MainWindow::onMapClicked(double x, double y)
 {
+    // Nav2ViewWidget 通过鼠标拖拽设置目标，不需要此函数
     m_targetX = x;
     m_targetY = y;
     m_targetYaw = 0.0;
     m_hasTarget = true;
 
-    if (m_mapWidget) {
-        m_mapWidget->clearMarkers();
-        MapMarker marker(x, y, QColor(255, 0, 0), "目标点", "导航目标");
-        m_mapWidget->addMarker(marker);
-    }
+    // if (m_mapWidget) {
+    //     m_mapWidget->clearMarkers();
+    //     MapMarker marker(x, y, QColor(255, 0, 0), "目标点", "导航目标");
+    //     m_mapWidget->addMarker(marker);
+    // }
 
     ui->labelTargetPosition->setText(QString("(%1, %2)").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2));
 
     QString message = QString("地图点击位置: (%1, %2) - 已设置为导航目标").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Map", "Click");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onMapConnectionStateChanged(bool connected)
 {
     QString status = connected ? "已连接" : "已断开";
     QString message = QString("地图连接状态: %1").arg(status);
-    LogEntry entry(message, connected ? LOG_INFO : LOG_WARNING, QDateTime::currentDateTime(), "Map", "Connection");
-    m_logTableModel->addLogEntry(entry);
+    int logLevel = connected ? LOG_INFO : LOG_WARNING;
+    LogEntry entry(message, logLevel, QDateTime::currentDateTime(), "Map", "Connection");
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(logLevel)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 
     ui->statusbar->showMessage(QString("地图: %1").arg(status), 3000);
 
@@ -741,45 +753,21 @@ void MainWindow::onLoadMapFromFile()
         return;
     }
 
-    nav_msgs::msg::OccupancyGrid::SharedPtr map;
+    // 删除旧的 Nav2ViewWidget
+    delete m_nav2ViewWidget;
 
-    if (m_mapCache && m_mapCache->contains(filePath)) {
-        map = m_mapCache->get(filePath);
-        qDebug() << "[MainWindow] 从缓存加载地图:" << filePath;
-    } else {
-        map = MapLoader::loadFromFile(filePath);
-        if (!map) {
-            QMessageBox::warning(this, "错误", "无法加载地图文件");
-            return;
-        }
+    // 创建新的 Nav2ViewWidget 加载新地图
+    auto node = std::make_shared<rclcpp::Node>("nav2_view_node");
+    m_nav2ViewWidget = new Nav2ViewWidget(filePath.toStdString(), node, this);
+    ui->nav2MapLayout->addWidget(m_nav2ViewWidget);
 
-        if (m_mapCache) {
-            m_mapCache->add(filePath, map);
-        }
-    }
-
-    QImage mapImage = MapConverter::convertToImage(map);
-    if (mapImage.isNull()) {
-        QMessageBox::warning(this, "错误", "无法转换地图图像");
-        return;
-    }
-
-    if (m_mapWidget) {
-        m_mapWidget->setMapImage(
-            mapImage,
-            map->info.resolution,
-            map->info.origin.position.x,
-            map->info.origin.position.y
-        );
-    }
-
-    QString message = QString("地图文件加载成功 - 文件: %1, 尺寸: %2x%3, 分辨率: %4")
-        .arg(filePath)
-        .arg(map->info.width)
-        .arg(map->info.height)
-        .arg(map->info.resolution, 0, 'f', 3);
+    QString message = QString("地图文件加载成功 - 文件: %1").arg(filePath);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Map", "FileLoad");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 
     ui->statusbar->showMessage(QString("地图已加载: %1").arg(QFileInfo(filePath).fileName()), 3000);
 }
@@ -787,31 +775,34 @@ void MainWindow::onLoadMapFromFile()
 void MainWindow::onStartNavigation()
 {
     if (!m_hasTarget) {
-        QMessageBox::warning(this, "警告", "请先在地图上点击设置目标点");
+        QMessageBox::warning(this, "提示", "请设置导航目标");
         return;
     }
 
-    if (m_navigationClient->isNavigating()) {
-        QMessageBox::information(this, "提示", "正在导航中，请先取消当前导航");
-        return;
-    }
+    // 调用 Nav2ViewWidget 发布目标到 /goal_pose 话题
+    m_nav2ViewWidget->publishCurrentGoal();
 
-    bool success = m_navigationClient->sendGoal(m_targetX, m_targetY, m_targetYaw);
-    if (!success) {
-        QMessageBox::critical(this, "错误", "发送导航目标失败");
-    }
+    ui->labelNavigationStatus->setText("导航中...");
+    ui->labelNavigationStatus->setStyleSheet("color: blue;");
 }
 
 void MainWindow::onCancelNavigation()
 {
     if (!m_navigationClient->isNavigating()) {
+        QMessageBox::information(this, "提示", "无导航任务");
         return;
     }
 
     bool success = m_navigationClient->cancelGoal();
     if (!success) {
         QMessageBox::warning(this, "警告", "取消导航失败");
+        return;
     }
+
+    m_nav2ViewWidget->clearGoal();
+
+    ui->labelNavigationStatus->setText("已取消");
+    ui->labelNavigationStatus->setStyleSheet("color: orange;");
 }
 
 void MainWindow::onClearGoal()
@@ -820,14 +811,9 @@ void MainWindow::onClearGoal()
     m_targetX = 0.0;
     m_targetY = 0.0;
     m_targetYaw = 0.0;
-    
-    if (m_mapWidget) {
-        m_mapWidget->clearMarkers();
-    }
 
-    if (m_pathVisualizer) {
-        m_pathVisualizer->clearPath();
-    }
+    // 清除 Nav2ViewWidget 的目标状态
+    m_nav2ViewWidget->clearGoal();
 
     ui->labelTargetPosition->setText("未设置");
     ui->labelNavigationStatus->setText("空闲");
@@ -848,7 +834,11 @@ void MainWindow::onNavigationFeedback(double distanceRemaining, double navigatio
         .arg(navigationTime, 0, 'f', 1)
         .arg(recoveries);
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Navigation", "Feedback");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onNavigationResult(bool success, const QString& message)
@@ -864,8 +854,13 @@ void MainWindow::onNavigationResult(bool success, const QString& message)
     }
 
     QString logMessage = QString("导航结果 - %1: %2").arg(success ? "成功" : "失败").arg(message);
-    LogEntry entry(logMessage, success ? LOG_INFO : LOG_WARNING, QDateTime::currentDateTime(), "Navigation", "Result");
-    m_logTableModel->addLogEntry(entry);
+    int logLevel = success ? LOG_INFO : LOG_WARNING;
+    LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "Navigation", "Result");
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(logLevel)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onGoalAccepted()
@@ -875,7 +870,11 @@ void MainWindow::onGoalAccepted()
 
     QString message = "导航目标已被接受，开始导航";
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
     ui->statusbar->showMessage(message, 3000);
 }
 
@@ -887,7 +886,11 @@ void MainWindow::onGoalRejected(const QString& reason)
 
     QString message = QString("导航目标被拒绝 - 原因: %1").arg(reason);
     LogEntry entry(message, LOG_WARNING, QDateTime::currentDateTime(), "Navigation", "Goal");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_WARNING)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::onGoalCanceled()
@@ -898,7 +901,11 @@ void MainWindow::onGoalCanceled()
 
     QString message = "导航目标已取消";
     LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
-    m_logTableModel->addLogEntry(entry);
+    m_allLogs.append(entry);
+    if (shouldDisplayLog(LOG_INFO)) {
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
+    }
 }
 
 void MainWindow::updateCurrentTime()

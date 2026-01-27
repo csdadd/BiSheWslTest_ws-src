@@ -34,6 +34,13 @@ void TestMainWindow::testUIComponents()
     QVERIFY(m_mainWindow->findChild<QGroupBox*>("mapGroupBox") != nullptr);
     QVERIFY(m_mainWindow->findChild<QGroupBox*>("filterGroupBox") != nullptr);
     QVERIFY(m_mainWindow->findChild<QTableView*>("logTableView") != nullptr);
+
+    // 验证日志级别复选框存在
+    QVERIFY(m_mainWindow->findChild<QCheckBox*>("debugCheckBox") != nullptr);
+    QVERIFY(m_mainWindow->findChild<QCheckBox*>("infoCheckBox") != nullptr);
+    QVERIFY(m_mainWindow->findChild<QCheckBox*>("warningCheckBox") != nullptr);
+    QVERIFY(m_mainWindow->findChild<QCheckBox*>("errorCheckBox") != nullptr);
+    QVERIFY(m_mainWindow->findChild<QCheckBox*>("fatalCheckBox") != nullptr);
 }
 
 void TestMainWindow::testThreadInitialization()
@@ -45,15 +52,31 @@ void TestMainWindow::testSignalConnections()
 {
     QPushButton* loadMapButton = m_mainWindow->findChild<QPushButton*>("loadMapButton");
     QVERIFY(loadMapButton != nullptr);
-    
+
     QPushButton* btnStartNavigation = m_mainWindow->findChild<QPushButton*>("btnStartNavigation");
     QVERIFY(btnStartNavigation != nullptr);
-    
+
     QPushButton* btnCancelNavigation = m_mainWindow->findChild<QPushButton*>("btnCancelNavigation");
     QVERIFY(btnCancelNavigation != nullptr);
-    
+
     QPushButton* btnClearGoal = m_mainWindow->findChild<QPushButton*>("btnClearGoal");
     QVERIFY(btnClearGoal != nullptr);
+
+    // 验证日志过滤复选框信号连接
+    QCheckBox* debugCheckBox = m_mainWindow->findChild<QCheckBox*>("debugCheckBox");
+    QVERIFY(debugCheckBox != nullptr);
+
+    QCheckBox* infoCheckBox = m_mainWindow->findChild<QCheckBox*>("infoCheckBox");
+    QVERIFY(infoCheckBox != nullptr);
+
+    QCheckBox* warningCheckBox = m_mainWindow->findChild<QCheckBox*>("warningCheckBox");
+    QVERIFY(warningCheckBox != nullptr);
+
+    QCheckBox* errorCheckBox = m_mainWindow->findChild<QCheckBox*>("errorCheckBox");
+    QVERIFY(errorCheckBox != nullptr);
+
+    QCheckBox* fatalCheckBox = m_mainWindow->findChild<QCheckBox*>("fatalCheckBox");
+    QVERIFY(fatalCheckBox != nullptr);
 }
 
 void TestMainWindow::testBatteryStatusSlot()
@@ -277,35 +300,260 @@ void TestMainWindow::testUIPermissionControl()
     QTest::qWait(100);
 }
 
-void TestMainWindow::testQueryLogsAsync()
-{
-    QDateTime startTime = QDateTime::currentDateTime().addDays(-1);
-    QDateTime endTime = QDateTime::currentDateTime();
-    
-    m_mainWindow->queryLogsAsync(startTime, endTime, -1, QString(), QString(), -1, 0);
-    
-    QTest::qWait(100);
-}
-
 void TestMainWindow::testThreadLifecycle()
 {
     QMetaObject::invokeMethod(m_mainWindow, "onConnectionStateChanged",
                               Qt::DirectConnection,
                               Q_ARG(bool, true));
     QTest::qWait(100);
-    
+
     QMetaObject::invokeMethod(m_mainWindow, "onThreadStarted",
                               Qt::DirectConnection,
                               Q_ARG(QString, "TestThread"));
     QTest::qWait(100);
-    
+
     QMetaObject::invokeMethod(m_mainWindow, "onThreadStopped",
                               Qt::DirectConnection,
                               Q_ARG(QString, "TestThread"));
     QTest::qWait(100);
-    
+
     QMetaObject::invokeMethod(m_mainWindow, "onThreadError",
                               Qt::DirectConnection,
                               Q_ARG(QString, "Test error"));
     QTest::qWait(100);
+}
+
+void TestMainWindow::testLogFilterCheckBoxesUI()
+{
+    // 验证所有日志级别复选框存在
+    QCheckBox* debugCheckBox = m_mainWindow->findChild<QCheckBox*>("debugCheckBox");
+    QVERIFY(debugCheckBox != nullptr);
+
+    QCheckBox* infoCheckBox = m_mainWindow->findChild<QCheckBox*>("infoCheckBox");
+    QVERIFY(infoCheckBox != nullptr);
+
+    QCheckBox* warningCheckBox = m_mainWindow->findChild<QCheckBox*>("warningCheckBox");
+    QVERIFY(warningCheckBox != nullptr);
+
+    QCheckBox* errorCheckBox = m_mainWindow->findChild<QCheckBox*>("errorCheckBox");
+    QVERIFY(errorCheckBox != nullptr);
+
+    QCheckBox* fatalCheckBox = m_mainWindow->findChild<QCheckBox*>("fatalCheckBox");
+    QVERIFY(fatalCheckBox != nullptr);
+
+    // 验证复选框默认状态为勾选
+    QVERIFY(debugCheckBox->isChecked());
+    QVERIFY(infoCheckBox->isChecked());
+    QVERIFY(warningCheckBox->isChecked());
+    QVERIFY(errorCheckBox->isChecked());
+    QVERIFY(fatalCheckBox->isChecked());
+}
+
+void TestMainWindow::testShouldDisplayLog()
+{
+    QCheckBox* debugCheckBox = m_mainWindow->findChild<QCheckBox*>("debugCheckBox");
+    QCheckBox* infoCheckBox = m_mainWindow->findChild<QCheckBox*>("infoCheckBox");
+    QCheckBox* warningCheckBox = m_mainWindow->findChild<QCheckBox*>("warningCheckBox");
+    QCheckBox* errorCheckBox = m_mainWindow->findChild<QCheckBox*>("errorCheckBox");
+    QCheckBox* fatalCheckBox = m_mainWindow->findChild<QCheckBox*>("fatalCheckBox");
+
+    QVERIFY(debugCheckBox != nullptr);
+    QVERIFY(infoCheckBox != nullptr);
+    QVERIFY(warningCheckBox != nullptr);
+    QVERIFY(errorCheckBox != nullptr);
+    QVERIFY(fatalCheckBox != nullptr);
+
+    // 测试默认状态（所有复选框都勾选）
+    bool result = false;
+    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
+                              Q_RETURN_ARG(bool, result),
+                              Q_ARG(int, 0));  // LOG_DEBUG = 0
+    QVERIFY(result);
+
+    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
+                              Q_RETURN_ARG(bool, result),
+                              Q_ARG(int, 1));  // LOG_INFO = 1
+    QVERIFY(result);
+
+    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
+                              Q_RETURN_ARG(bool, result),
+                              Q_ARG(int, 2));  // LOG_WARNING = 2
+    QVERIFY(result);
+
+    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
+                              Q_RETURN_ARG(bool, result),
+                              Q_ARG(int, 3));  // LOG_ERROR = 3
+    QVERIFY(result);
+
+    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
+                              Q_RETURN_ARG(bool, result),
+                              Q_ARG(int, 4));  // LOG_FATAL = 4
+    QVERIFY(result);
+
+    // 取消勾选 DEBUG 复选框
+    debugCheckBox->setChecked(false);
+
+    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
+                              Q_RETURN_ARG(bool, result),
+                              Q_ARG(int, 0));  // LOG_DEBUG
+    QVERIFY(!result);
+
+    // 恢复 DEBUG 复选框
+    debugCheckBox->setChecked(true);
+
+    // 测试未知日志级别
+    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
+                              Q_RETURN_ARG(bool, result),
+                              Q_ARG(int, 999));  // 未知级别
+    QVERIFY(!result);
+}
+
+void TestMainWindow::testRefreshLogDisplay()
+{
+    // 模拟添加多条不同级别的日志
+    QDateTime now = QDateTime::currentDateTime();
+
+    // 添加5条不同级别的日志
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Debug message"),
+                              Q_ARG(int, 0),  // LOG_DEBUG
+                              Q_ARG(QDateTime, now));
+
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Info message"),
+                              Q_ARG(int, 1),  // LOG_INFO
+                              Q_ARG(QDateTime, now.addSecs(1)));
+
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Warning message"),
+                              Q_ARG(int, 2),  // LOG_WARNING
+                              Q_ARG(QDateTime, now.addSecs(2)));
+
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Error message"),
+                              Q_ARG(int, 3),  // LOG_ERROR
+                              Q_ARG(QDateTime, now.addSecs(3)));
+
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Fatal message"),
+                              Q_ARG(int, 4),  // LOG_FATAL
+                              Q_ARG(QDateTime, now.addSecs(4)));
+
+    QTest::qWait(100);
+
+    QTableView* logTableView = m_mainWindow->findChild<QTableView*>("logTableView");
+    QVERIFY(logTableView != nullptr);
+
+    int initialRowCount = logTableView->model()->rowCount();
+    QVERIFY(initialRowCount >= 5);
+
+    // 只保留 ERROR 和 FATAL 级别
+    QCheckBox* debugCheckBox = m_mainWindow->findChild<QCheckBox*>("debugCheckBox");
+    QCheckBox* infoCheckBox = m_mainWindow->findChild<QCheckBox*>("infoCheckBox");
+    QCheckBox* warningCheckBox = m_mainWindow->findChild<QCheckBox*>("warningCheckBox");
+
+    debugCheckBox->setChecked(false);
+    infoCheckBox->setChecked(false);
+    warningCheckBox->setChecked(false);
+
+    QTest::qWait(100);
+
+    // 验证只显示 ERROR 和 FATAL 级别日志
+    int filteredRowCount = logTableView->model()->rowCount();
+    QVERIFY(filteredRowCount < initialRowCount);
+
+    // 恢复所有复选框
+    debugCheckBox->setChecked(true);
+    infoCheckBox->setChecked(true);
+    warningCheckBox->setChecked(true);
+
+    QTest::qWait(100);
+
+    // 验证所有日志重新显示
+    int restoredRowCount = logTableView->model()->rowCount();
+    QVERIFY(restoredRowCount == initialRowCount);
+}
+
+void TestMainWindow::testOnFilterChanged()
+{
+    // 先添加一些测试日志
+    QDateTime now = QDateTime::currentDateTime();
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Test message 1"),
+                              Q_ARG(int, 0),  // LOG_DEBUG
+                              Q_ARG(QDateTime, now));
+
+    QTest::qWait(50);
+
+    QTableView* logTableView = m_mainWindow->findChild<QTableView*>("logTableView");
+    QVERIFY(logTableView != nullptr);
+
+    int countBefore = logTableView->model()->rowCount();
+
+    // 切换 DEBUG 复选框状态
+    QCheckBox* debugCheckBox = m_mainWindow->findChild<QCheckBox*>("debugCheckBox");
+    QVERIFY(debugCheckBox != nullptr);
+
+    debugCheckBox->setChecked(false);
+    QTest::qWait(50);
+
+    int countAfter = logTableView->model()->rowCount();
+    QVERIFY(countAfter < countBefore);
+
+    // 恢复
+    debugCheckBox->setChecked(true);
+    QTest::qWait(50);
+
+    int countRestored = logTableView->model()->rowCount();
+    QVERIFY(countRestored == countBefore);
+}
+
+void TestMainWindow::testLogRealTimeFiltering()
+{
+    QTableView* logTableView = m_mainWindow->findChild<QTableView*>("logTableView");
+    QVERIFY(logTableView != nullptr);
+
+    QDateTime now = QDateTime::currentDateTime();
+
+    // 取消 INFO 和 WARNING
+    QCheckBox* infoCheckBox = m_mainWindow->findChild<QCheckBox*>("infoCheckBox");
+    QCheckBox* warningCheckBox = m_mainWindow->findChild<QCheckBox*>("warningCheckBox");
+    infoCheckBox->setChecked(false);
+    warningCheckBox->setChecked(false);
+
+    QTest::qWait(50);
+
+    int countBefore = logTableView->model()->rowCount();
+
+    // 添加一条 INFO 日志（不应该显示）
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Info message"),
+                              Q_ARG(int, 1),  // LOG_INFO
+                              Q_ARG(QDateTime, now));
+
+    QTest::qWait(50);
+
+    int countAfterInfo = logTableView->model()->rowCount();
+    QVERIFY(countAfterInfo == countBefore);  // INFO 日志不应该显示
+
+    // 添加一条 ERROR 日志（应该显示）
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Error message"),
+                              Q_ARG(int, 3),  // LOG_ERROR
+                              Q_ARG(QDateTime, now.addSecs(1)));
+
+    QTest::qWait(50);
+
+    int countAfterError = logTableView->model()->rowCount();
+    QVERIFY(countAfterError > countBefore);  // ERROR 日志应该显示
+
+    // 重新勾选 INFO，验证历史 INFO 日志恢复
+    infoCheckBox->setChecked(true);
+    QTest::qWait(50);
+
+    int countRestored = logTableView->model()->rowCount();
+    QVERIFY(countRestored > countAfterError);  // INFO 历史日志应该恢复
+
+    // 恢复所有复选框
+    warningCheckBox->setChecked(true);
 }

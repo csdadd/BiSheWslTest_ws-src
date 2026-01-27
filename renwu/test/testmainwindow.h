@@ -45,8 +45,13 @@ private slots:
     void testNavigationControlSlots();
     void testUserPermissionSlots();
     void testUIPermissionControl();
-    void testQueryLogsAsync();
     void testThreadLifecycle();
+
+    void testLogFilterCheckBoxesUI();
+    void testShouldDisplayLog();
+    void testRefreshLogDisplay();
+    void testOnFilterChanged();
+    void testLogRealTimeFiltering();
 
 private:
     MainWindow* m_mainWindow;

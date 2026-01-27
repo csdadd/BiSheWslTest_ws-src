@@ -186,5 +186,10 @@ int main(int argc, char** argv)
         result |= QTest::qExec(&testMainWindow, argc, argv);
     }
 
+    {
+        TestNavigationIntegration testNavigationIntegration;
+        result |= QTest::qExec(&testNavigationIntegration, argc, argv);
+    }
+
     return result;
 }

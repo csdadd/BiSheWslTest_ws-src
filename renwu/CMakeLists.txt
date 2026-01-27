@@ -35,6 +35,7 @@ find_package(rcl_interfaces REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
+find_package(yaml-cpp REQUIRED)
 
 set(PROJECT_SOURCES
         main.cpp
@@ -82,6 +83,8 @@ set(PROJECT_SOURCES
         navigationactionclient.cpp
         pathvisualizer.h
         pathvisualizer.cpp
+        nav2viewwidget.h
+        nav2viewwidget.cpp
         user.h
         userstorageengine.h
         userstorageengine.cpp
@@ -109,6 +112,7 @@ target_link_libraries(renwu PRIVATE
     Qt5::Widgets
     Qt5::Concurrent
     Qt5::Sql
+    yaml-cpp
 )
 
 ament_target_dependencies(renwu PUBLIC
@@ -244,6 +248,8 @@ if(BUILD_TESTING)
         navigationactionclient.cpp
         pathvisualizer.h
         pathvisualizer.cpp
+        nav2viewwidget.h
+        nav2viewwidget.cpp
         user.h
         userstorageengine.h
         userstorageengine.cpp
@@ -270,6 +276,7 @@ if(BUILD_TESTING)
         Qt5::Test
         Qt5::Sql
         Qt5::Concurrent
+        yaml-cpp
     )
 
     ament_target_dependencies(renwu_tests PUBLIC
