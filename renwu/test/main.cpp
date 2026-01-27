@@ -29,6 +29,8 @@
 #include "testmapcache.h"
 #include "testmapthread.h"
 #include "testmainwindow.h"
+#include "testnav2parameterthread.h"
+#include "testnav2parameterthreadintegration.h"
 
 int main(int argc, char** argv)
 {
@@ -187,8 +189,13 @@ int main(int argc, char** argv)
     }
 
     {
-        TestNavigationIntegration testNavigationIntegration;
-        result |= QTest::qExec(&testNavigationIntegration, argc, argv);
+        TestNav2ParameterThread testNav2ParameterThread;
+        result |= QTest::qExec(&testNav2ParameterThread, argc, argv);
+    }
+
+    {
+        TestNav2ParameterThreadIntegration testNav2ParameterThreadIntegration;
+        result |= QTest::qExec(&testNav2ParameterThreadIntegration, argc, argv);
     }
 
     return result;

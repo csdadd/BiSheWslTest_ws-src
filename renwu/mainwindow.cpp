@@ -36,6 +36,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_userAuthManager(nullptr)
     , m_loginDialog(nullptr)
     , m_userManagementDialog(nullptr)
+    , m_paramThread(nullptr)
 {
     ui->setupUi(this);
 
@@ -135,6 +136,7 @@ MainWindow::~MainWindow()
     delete m_systemMonitorThread;
     delete m_logThread;
     delete m_mapThread;
+    delete m_paramThread;
     delete m_nav2ViewWidget;
     // delete m_mapWidget;  // 保留备份
     delete m_mapCache;
@@ -150,6 +152,7 @@ void MainWindow::initializeThreads()
     m_systemMonitorThread = new SystemMonitorThread(this);
     m_logThread = new LogThread(this);
     m_mapThread = new MapThread(this);
+    m_paramThread = new Nav2ParameterThread(this);
 
     m_logTableModel->setStorageEngine(m_logThread->getStorageEngine());
 }
@@ -309,11 +312,59 @@ void MainWindow::connectSignals()
                 m_hasTarget = true;
                 ui->labelTargetPosition->setText(QString("(%1, %2)").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2));
             });
+
+    // Nav2ParameterThread 信号连接
+    connect(m_paramThread, &Nav2ParameterThread::threadStarted,
+            this, &MainWindow::onThreadStarted);
+    connect(m_paramThread, &Nav2ParameterThread::threadStopped,
+            this, &MainWindow::onThreadStopped);
+    connect(m_paramThread, &Nav2ParameterThread::threadError,
+            this, &MainWindow::onThreadError);
+    connect(m_paramThread, &Nav2ParameterThread::parameterRefreshed,
+            this, &MainWindow::onParameterRefreshed);
+    connect(m_paramThread, &Nav2ParameterThread::parameterApplied,
+            this, &MainWindow::onParameterApplied);
+    connect(m_paramThread, &Nav2ParameterThread::operationFinished,
+            this, &MainWindow::onParameterOperationFinished);
+
+    // Settings Tab 按钮连接
+    connect(ui->refreshButton, &QPushButton::clicked, this, &MainWindow::onRefreshButtonClicked);
+    connect(ui->applyButton, &QPushButton::clicked, this, &MainWindow::onApplyButtonClicked);
+    connect(ui->resetButton, &QPushButton::clicked, this, &MainWindow::onResetButtonClicked);
+    connect(ui->discardButton, &QPushButton::clicked, this, &MainWindow::onDiscardButtonClicked);
+
+    // 参数控件值变化连接
+    connect(ui->maxVelXSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->minVelXSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->maxVelThetaSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->lookaheadDistSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->localInflationRadiusSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->localCostScalingFactorSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->globalInflationRadiusSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->globalCostScalingFactorSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->smootherMaxVelSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->smootherMinVelSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->smootherMaxAccelSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->smootherMaxDecelSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
+    connect(ui->robotRadiusSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::onParameterValueChanged);
 }
 
 void MainWindow::startAllThreads()
 {
-    // 启动顺序：日志 -> 系统监控 -> 机器人状态 -> 导航状态 -> 地图
+    // 启动顺序：日志 -> 系统监控 -> 机器人状态 -> 导航状态 -> 地图 -> 参数
     m_logThread->start();
     QThread::msleep(100);
 
@@ -327,11 +378,19 @@ void MainWindow::startAllThreads()
     QThread::msleep(100);
 
     m_mapThread->start();
+    QThread::msleep(100);
+
+    m_paramThread->start();
 }
 
 void MainWindow::stopAllThreads()
 {
     // 停止顺序与启动相反
+    if (m_paramThread && m_paramThread->isRunning()) {
+        m_paramThread->stopThread();
+        m_paramThread->wait(3000);
+    }
+
     if (m_mapThread && m_mapThread->isRunning()) {
         m_mapThread->stopThread();
         m_mapThread->wait(3000);
@@ -999,4 +1058,140 @@ void MainWindow::updateUIBasedOnPermission()
     ui->statusbar->showMessage(statusText, 0);
 
     qDebug() << "[MainWindow] UI updated based on permission:" << permissionText;
+}
+
+// ==================== Nav2ParameterThread 槽函数 ====================
+
+void MainWindow::onRefreshButtonClicked()
+{
+    m_paramThread->requestRefresh();
+    ui->statusLabel->setText("正在刷新参数...");
+    ui->refreshButton->setEnabled(false);
+}
+
+void MainWindow::onApplyButtonClicked()
+{
+    if (!m_paramThread->hasPendingChanges()) {
+        QMessageBox::information(this, "提示", "没有待应用的更改");
+        return;
+    }
+
+    auto reply = QMessageBox::question(this, "确认应用",
+        "确定要应用修改的参数到 ROS2 吗？",
+        QMessageBox::Yes | QMessageBox::No);
+    if (reply == QMessageBox::Yes) {
+        m_paramThread->requestApply();
+        ui->statusLabel->setText("正在应用参数...");
+        ui->applyButton->setEnabled(false);
+    }
+}
+
+void MainWindow::onResetButtonClicked()
+{
+    auto reply = QMessageBox::question(this, "确认重置",
+        "确定要将所有参数重置为默认值吗？\n重置后需要点击\"应用更改\"按钮。",
+        QMessageBox::Yes | QMessageBox::No);
+    if (reply == QMessageBox::Yes) {
+        m_paramThread->requestReset();
+    }
+}
+
+void MainWindow::onDiscardButtonClicked()
+{
+    auto reply = QMessageBox::question(this, "确认放弃",
+        "确定要放弃所有未应用的修改吗？",
+        QMessageBox::Yes | QMessageBox::No);
+    if (reply == QMessageBox::Yes) {
+        m_paramThread->requestDiscard();
+    }
+}
+
+void MainWindow::onParameterRefreshed(bool success, const QString& message)
+{
+    ui->statusLabel->setText(message);
+    ui->refreshButton->setEnabled(true);
+
+    if (success) {
+        ui->statusLabel->setStyleSheet("color: green;");
+        // 更新所有参数控件显示
+        auto params = m_paramThread->getAllParams();
+        for (auto it = params.begin(); it != params.end(); ++it) {
+            updateParameterValue(it.key(), it.value().currentValue);
+        }
+    } else {
+        ui->statusLabel->setStyleSheet("color: red;");
+    }
+
+    QTimer::singleShot(3000, this, [this]() {
+        ui->statusLabel->setText("就绪");
+        ui->statusLabel->setStyleSheet("");
+    });
+}
+
+void MainWindow::onParameterApplied(bool success, const QString& message, const QStringList& appliedKeys)
+{
+    ui->statusLabel->setText(message);
+    ui->applyButton->setEnabled(true);
+
+    if (success) {
+        ui->statusLabel->setStyleSheet("color: green;");
+        // 更新已应用的参数控件显示
+        for (const QString& key : appliedKeys) {
+            Nav2ParameterThread::ParamInfo info;
+            if (m_paramThread->getParamInfo(key, info)) {
+                updateParameterValue(key, info.currentValue);
+            }
+        }
+    } else {
+        ui->statusLabel->setStyleSheet("color: red;");
+    }
+
+    QTimer::singleShot(3000, this, [this]() {
+        ui->statusLabel->setText("就绪");
+        ui->statusLabel->setStyleSheet("");
+    });
+}
+
+void MainWindow::onParameterOperationFinished(const QString& operation, bool success, const QString& message)
+{
+    ui->statusLabel->setText(message);
+
+    if (success) {
+        ui->statusLabel->setStyleSheet("color: green;");
+        if (operation == "Reset") {
+            // 重置后更新显示为 pendingValue
+            auto params = m_paramThread->getAllParams();
+            for (auto it = params.begin(); it != params.end(); ++it) {
+                updateParameterValue(it.key(), it.value().pendingValue);
+            }
+        }
+    } else {
+        ui->statusLabel->setStyleSheet("color: red;");
+    }
+
+    QTimer::singleShot(3000, this, [this]() {
+        ui->statusLabel->setText("就绪");
+        ui->statusLabel->setStyleSheet("");
+    });
+}
+
+void MainWindow::onParameterValueChanged(double value)
+{
+    QDoubleSpinBox* spinBox = qobject_cast<QDoubleSpinBox*>(sender());
+    if (!spinBox) return;
+
+    QString key = spinBox->objectName();
+    // 将控件名转换为参数 key
+    key.replace("SpinBox", "");
+
+    m_paramThread->setPendingValue(key, value);
+}
+
+void MainWindow::updateParameterValue(const QString& key, const QVariant& value)
+{
+    QString objectName = key + "SpinBox";
+    QDoubleSpinBox* spinBox = findChild<QDoubleSpinBox*>(objectName);
+    if (spinBox) {
+        spinBox->setValue(value.toDouble());
+    }
 }

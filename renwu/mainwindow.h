@@ -22,6 +22,7 @@
 #include "usermanagementdialog.h"
 #include "changepassworddialog.h"
 #include "user.h"
+#include "nav2parameterthread.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -90,6 +91,16 @@ private slots:
     void onChangePassword();
     void updateUIBasedOnPermission();
 
+    // Nav2ParameterThread 槽函数
+    void onRefreshButtonClicked();
+    void onApplyButtonClicked();
+    void onResetButtonClicked();
+    void onDiscardButtonClicked();
+    void onParameterRefreshed(bool success, const QString& message);
+    void onParameterApplied(bool success, const QString& message, const QStringList& appliedKeys);
+    void onParameterOperationFinished(const QString& operation, bool success, const QString& message);
+    void onParameterValueChanged(double value);
+
 private:
     void initializeThreads();
     void connectSignals();
@@ -97,6 +108,7 @@ private:
     void stopAllThreads();
     Q_INVOKABLE void refreshLogDisplay(bool autoScroll = true);
     Q_INVOKABLE bool shouldDisplayLog(int level) const;
+    void updateParameterValue(const QString& key, const QVariant& value);
 
 private:
     Ui::MainWindow *ui;
@@ -124,6 +136,7 @@ private:
     UserAuthManager* m_userAuthManager;
     LoginDialog* m_loginDialog;
     UserManagementDialog* m_userManagementDialog;
+    Nav2ParameterThread* m_paramThread;
 };
 
 #endif // MAINWINDOW_H

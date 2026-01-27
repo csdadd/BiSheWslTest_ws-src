@@ -1,0 +1,62 @@
+#ifndef TESTNAV2PARAMETERTHREADINTEGRATION_H
+#define TESTNAV2PARAMETERTHREADINTEGRATION_H
+
+#include <QtTest/QtTest>
+#include <QSignalSpy>
+#include <QThread>
+#include "nav2parameterthread.h"
+#include "roscontextmanager.h"
+
+class TestNav2ParameterThreadIntegration : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void initTestCase();
+    void cleanupTestCase();
+    void init();
+    void cleanup();
+
+    // 参数读取测试
+    void testReadNormalParameters();
+    void testReadArrayParameters();
+    void testReadCostmapParameters();
+    void testReadRobotRadius();
+    void testAllParametersRead();
+
+    // 参数写入测试
+    void testWriteNormalParameter();
+    void testWriteArrayParameter();
+    void testWriteRobotRadius();
+    void testWriteBatchParameters();
+    void testWriteWithNoModifications();
+
+    // 刷新功能测试
+    void testRefreshAllParameters();
+    void testRefreshPreservesDefault();
+
+    // 重置功能测试
+    void testResetAllParameters();
+    void testResetThenApply();
+
+    // 放弃功能测试
+    void testDiscardSingleParameter();
+    void testDiscardMultipleParameters();
+    void testDiscardNoModifications();
+
+    // 线程安全测试
+    void testConcurrentRefreshAndModify();
+    void testRapidSequentialOperations();
+
+    // 异常处理测试
+    void testNodeUnavailable();
+
+    // 信号测试
+    void testOperationFinishedSignal();
+
+private:
+    Nav2ParameterThread* m_thread;
+    QMap<QString, QVariant> m_initialValues;  // 保存初始值用于恢复
+};
+
+#endif

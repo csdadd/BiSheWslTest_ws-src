@@ -102,6 +102,8 @@ set(PROJECT_SOURCES
         adduserdialog.h
         adduserdialog.cpp
         adduserdialog.ui
+        nav2parameterthread.h
+        nav2parameterthread.cpp
 )
 
 add_executable(renwu
@@ -204,6 +206,10 @@ if(BUILD_TESTING)
         test/testmapthread.h
         test/testmainwindow.cpp
         test/testmainwindow.h
+        test/testnav2parameterthread.cpp
+        test/testnav2parameterthread.h
+        test/testnav2parameterthreadintegration.cpp
+        test/testnav2parameterthreadintegration.h
         mainwindow.cpp
         mainwindow.h
         mainwindow.ui
@@ -267,6 +273,8 @@ if(BUILD_TESTING)
         adduserdialog.h
         adduserdialog.cpp
         adduserdialog.ui
+        nav2parameterthread.h
+        nav2parameterthread.cpp
     )
 
     add_executable(renwu_tests ${TEST_SOURCES})
