@@ -46,7 +46,7 @@ void Nav2ParameterThread::initialize()
 
         m_initialized = true;
         qDebug() << "[Nav2ParameterThread] 初始化成功";
-        emit logMessage("Nav2ParameterThread initialized successfully", 0);
+        emit logMessage("Nav2ParameterThread initialized successfully", LogLevel::INFO);
 
     } catch (const std::exception& e) {
         QString error = QString("Failed to initialize Nav2ParameterThread: %1").arg(e.what());
@@ -59,15 +59,9 @@ void Nav2ParameterThread::initialize()
 
 void Nav2ParameterThread::process()
 {
-    QMutexLocker queueLocker(&m_queueMutex);
-
-    while (!m_taskQueue.isEmpty()) {
-        ParamTask task = m_taskQueue.dequeue();
-        queueLocker.unlock();
-
+    ParamTask task;
+    while (m_taskQueue.tryDequeue(task, 10)) {
         processTask(task);
-
-        queueLocker.relock();
     }
 }
 
@@ -88,7 +82,7 @@ void Nav2ParameterThread::cleanup()
     m_initialized = false;
 
     qDebug() << "[Nav2ParameterThread] 清理完成";
-    emit logMessage("Nav2ParameterThread cleanup completed", 0);
+    emit logMessage("Nav2ParameterThread cleanup completed", LogLevel::INFO);
 }
 
 bool Nav2ParameterThread::getParamInfo(const QString& key, ParamInfo& outInfo) const
@@ -140,28 +134,24 @@ bool Nav2ParameterThread::hasPendingChanges() const
 
 void Nav2ParameterThread::requestRefresh()
 {
-    QMutexLocker locker(&m_queueMutex);
     m_taskQueue.enqueue(ParamTask(TaskType::Refresh));
     qDebug() << "[Nav2ParameterThread] 已添加刷新任务到队列";
 }
 
 void Nav2ParameterThread::requestApply()
 {
-    QMutexLocker locker(&m_queueMutex);
     m_taskQueue.enqueue(ParamTask(TaskType::Apply));
     qDebug() << "[Nav2ParameterThread] 已添加应用任务到队列";
 }
 
 void Nav2ParameterThread::requestReset()
 {
-    QMutexLocker locker(&m_queueMutex);
     m_taskQueue.enqueue(ParamTask(TaskType::Reset));
     qDebug() << "[Nav2ParameterThread] 已添加重置任务到队列";
 }
 
 void Nav2ParameterThread::requestDiscard()
 {
-    QMutexLocker locker(&m_queueMutex);
     m_taskQueue.enqueue(ParamTask(TaskType::Discard));
     qDebug() << "[Nav2ParameterThread] 已添加丢弃任务到队列";
 }

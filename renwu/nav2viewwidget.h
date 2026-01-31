@@ -3,12 +3,15 @@
 #include <QWidget>
 #include <QImage>
 #include <QPointF>
+#include <QReadWriteLock>
 #include <vector>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include "coordinatetransformer.h"
 
 class Nav2ViewWidget : public QWidget {
     Q_OBJECT
@@ -16,6 +19,8 @@ class Nav2ViewWidget : public QWidget {
 signals:
     void dataUpdated();
     void goalPosePreview(double x, double y, double yaw);
+    void mapLoadFailed(const QString& error);
+    void mapLoadSucceeded();
 
 public:
     explicit Nav2ViewWidget(const std::string& map_yaml_path,
@@ -34,12 +39,12 @@ protected:
 
 private:
     bool loadMapFromYaml(const std::string& yaml_path);
-    QPointF mapToQt(double x, double y) const;
-    void qtToMap(const QPointF& point, double& x, double& y) const;
 
     void planCallback(const nav_msgs::msg::Path::SharedPtr msg);
     void amclPoseCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
     void goalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+    void localPlanCallback(const nav_msgs::msg::Path::SharedPtr msg);
+    void scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg);
 
 private:
     rclcpp::Node::SharedPtr node_;
@@ -48,6 +53,8 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr amcl_pose_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_pub_;
+    rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr local_plan_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
 
     QImage map_image_;
     double map_resolution_;
@@ -56,6 +63,8 @@ private:
     bool map_loaded_;
 
     std::vector<QPointF> path_points_;
+    std::vector<QPointF> local_path_points_;
+    std::vector<QPointF> scan_points_;
 
     double robot_x_;
     double robot_y_;
@@ -69,7 +78,16 @@ private:
     double goal_yaw_;
     bool goal_pose_received_;
 
+    mutable QReadWriteLock data_lock_;  // 保护ROS回调数据的读写锁
+
+    CoordinateTransformer coord_transformer_;  // 坐标转换器
+
     bool mouse_dragging_;
     QPointF mouse_press_pos_;
     QPointF mouse_current_pos_;
+
+    // 缓存缩放后的地图图像（用于优化paintEvent性能）
+    mutable QImage cached_scaled_map_;
+    mutable double cached_scale_ = -1.0;
+    mutable QSize cached_widget_size_;
 };

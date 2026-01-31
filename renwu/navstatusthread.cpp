@@ -25,7 +25,7 @@ void NavStatusThread::initialize()
         m_executor->add_node(m_rosNode);
 
         qDebug() << "[NavStatusThread] 初始化成功";
-        emit logMessage("NavStatusThread initialized successfully", 0);
+        emit logMessage("NavStatusThread initialized successfully", LogLevel::INFO);
         emit connectionStateChanged(true);
 
     } catch (const std::exception& e) {
@@ -62,11 +62,10 @@ void NavStatusThread::subscribeROSTopics()
 
 void NavStatusThread::process()
 {
-    static int count = 0;
-    count++;
-    if (count >= 100) {
+    m_processCount++;
+    if (m_processCount >= 100) {
         qDebug() << "[NavStatusThread] 正在运行 - 获取导航状态、反馈和路径信息";
-        count = 0;
+        m_processCount = 0;
     }
     if (m_executor && m_rosNode) {
         m_executor->spin_some();
@@ -79,7 +78,7 @@ void NavStatusThread::cleanup()
     m_rosNode.reset();
 
     emit connectionStateChanged(false);
-    emit logMessage("NavStatusThread cleanup completed", 0);
+    emit logMessage("NavStatusThread cleanup completed", LogLevel::INFO);
 }
 
 void NavStatusThread::processNavigationStatus(const action_msgs::msg::GoalStatusArray::SharedPtr msg)
@@ -121,7 +120,7 @@ void NavStatusThread::processNavigationStatus(const action_msgs::msg::GoalStatus
     emit navigationStatusReceived(status, statusStr);
 
     if (!logMsg.isEmpty()) {
-        emit logMessage(logMsg, status >= 3 ? 2 : 0);
+        emit logMessage(logMsg, status >= 3 ? LogLevel::WARNING : LogLevel::INFO);
     }
 }
 

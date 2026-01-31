@@ -1,10 +1,12 @@
 #include "logthread.h"
+#include "logutils.h"
 #include <QDir>
 #include <QCoreApplication>
 #include <QDebug>
 
-LogThread::LogThread(QObject* parent)
+LogThread::LogThread(LogStorageEngine* storageEngine, QObject* parent)
     : BaseThread(parent)
+    , m_storageEngine(storageEngine)
     , m_maxFileSize(DEFAULT_MAX_FILE_SIZE)
     , m_maxFileCount(DEFAULT_MAX_FILE_COUNT)
 {
@@ -16,8 +18,8 @@ LogThread::LogThread(QObject* parent)
         dir.mkpath(m_logDirectory);
     }
 
-    QString currentDate = QDateTime::currentDateTime().toString("yyyy-MM-dd");
-    m_logFilePath = m_logDirectory + QString("/robot_%1.log").arg(currentDate);
+    m_currentLogDate = QDateTime::currentDateTime().toString("yyyy-MM-dd");
+    m_logFilePath = m_logDirectory + QString("/robot_%1.log").arg(m_currentLogDate);
 }
 
 LogThread::~LogThread()
@@ -51,10 +53,8 @@ void LogThread::initialize()
             emit threadError(QString("Failed to open log file: %1").arg(m_logFilePath));
         }
 
-        m_storageEngine = new LogStorageEngine(nullptr);
-        QString dbPath = m_logDirectory + "/app_logs.db";
-        if (!m_storageEngine->initialize(dbPath)) {
-            emit threadError(QString("Failed to initialize LogStorageEngine: %1").arg(m_storageEngine->getLastError()));
+        if (m_storageEngine && !m_storageEngine->isInitialized()) {
+            emit threadError("LogStorageEngine not initialized");
         }
 
         emit logFileChanged(m_logFilePath);
@@ -68,11 +68,10 @@ void LogThread::initialize()
 
 void LogThread::process()
 {
-    static int count = 0;
-    count++;
-    if (count >= 100) {
+    m_processCount++;
+    if (m_processCount >= 100) {
         qDebug() << "[LogThread] 正在运行 - 处理日志队列";
-        count = 0;
+        m_processCount = 0;
     }
     processLogQueue();
 }
@@ -90,7 +89,7 @@ void LogThread::cleanup()
     emit logMessage("LogThread cleanup completed", LOG_INFO);
 }
 
-void LogThread::writeLog(const QString& message, int level)
+void LogThread::writeLog(const QString& message, LogLevel level)
 {
     LogEntry entry(message, level, QDateTime::currentDateTime(), "Application", "User");
     m_logQueue.enqueue(entry);
@@ -105,10 +104,10 @@ void LogThread::processLogQueue()
 {
     QVector<StorageLogEntry> batchEntries;
     LogEntry entry;
-    
+
     while (m_logQueue.tryDequeue(entry, 0)) {
         writeToFile(entry.message, entry.level, entry.timestamp, entry.source);
-        
+
         StorageLogEntry storageEntry(
             entry.message,
             entry.level,
@@ -117,21 +116,25 @@ void LogThread::processLogQueue()
             entry.category
         );
         batchEntries.append(storageEntry);
-        
+
         if (batchEntries.size() >= 100) {
             if (m_storageEngine && m_storageEngine->isInitialized()) {
-                m_storageEngine->insertLogs(batchEntries);
+                if (!m_storageEngine->insertLogs(batchEntries)) {
+                    qWarning() << "[LogThread] Failed to insert logs to database, will retry next cycle";
+                }
             }
             batchEntries.clear();
         }
     }
-    
+
     if (!batchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
-        m_storageEngine->insertLogs(batchEntries);
+        if (!m_storageEngine->insertLogs(batchEntries)) {
+            qWarning() << "[LogThread] Failed to insert remaining logs to database, will retry next cycle";
+        }
     }
 }
 
-void LogThread::writeToFile(const QString& message, int level, const QDateTime& timestamp, const QString& source)
+void LogThread::writeToFile(const QString& message, LogLevel level, const QDateTime& timestamp, const QString& source)
 {
     QMutexLocker locker(&m_fileMutex);
 
@@ -139,17 +142,38 @@ void LogThread::writeToFile(const QString& message, int level, const QDateTime& 
         return;
     }
 
+    checkDateRollover();
     rotateLogFile();
 
     QString formattedMsg = formatLogMessage(message, level, timestamp, source);
-    m_logStream << formattedMsg << endl;
+    m_logStream << formattedMsg << Qt::endl;
     m_logStream.flush();
+}
+
+void LogThread::checkDateRollover()
+{
+    QString currentDate = QDateTime::currentDateTime().toString("yyyy-MM-dd");
+    if (currentDate != m_currentLogDate) {
+        m_logFile.close();
+        m_logStream.setDevice(nullptr);
+
+        m_currentLogDate = currentDate;
+        m_logFilePath = m_logDirectory + QString("/robot_%1.log").arg(m_currentLogDate);
+
+        m_logFile.setFileName(m_logFilePath);
+        if (m_logFile.open(QIODevice::WriteOnly | QIODevice::Append)) {
+            m_logStream.setDevice(&m_logFile);
+            m_logStream.setCodec(QTextCodec::codecForName("UTF-8"));
+            emit logFileChanged(m_logFilePath);
+        }
+    }
 }
 
 void LogThread::rotateLogFile()
 {
     if (m_logFile.size() >= m_maxFileSize) {
         m_logFile.close();
+        m_logStream.setDevice(nullptr);
 
         QFileInfo fileInfo(m_logFilePath);
         QString baseName = fileInfo.baseName();
@@ -176,33 +200,15 @@ void LogThread::rotateLogFile()
     }
 }
 
-QString LogThread::formatLogMessage(const QString& message, int level, const QDateTime& timestamp, const QString& source)
+QString LogThread::formatLogMessage(const QString& message, LogLevel level, const QDateTime& timestamp, const QString& source)
 {
     QString timeStr = timestamp.toString("yyyy-MM-dd hh:mm:ss.zzz");
-    QString levelStr = levelToString(level);
+    QString levelStr = LogUtils::levelToString(level);
 
     if (source.isEmpty()) {
         return QString("[%1] [%2] %3").arg(timeStr, levelStr, message);
     } else {
         return QString("[%1] [%2] [%3] %4").arg(timeStr, levelStr, source, message);
-    }
-}
-
-QString LogThread::levelToString(int level)
-{
-    switch (level) {
-        case LOG_DEBUG:
-            return "DEBUG";
-        case LOG_INFO:
-            return "INFO";
-        case LOG_WARNING:
-            return "WARN";
-        case LOG_ERROR:
-            return "ERROR";
-        case LOG_FATAL:
-            return "FATAL";
-        default:
-            return "UNKNOWN";
     }
 }
 

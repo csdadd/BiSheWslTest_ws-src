@@ -1,4 +1,5 @@
 #include "logstorageengine.h"
+#include "logutils.h"
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QDir>
@@ -155,7 +156,7 @@ bool LogStorageEngine::insertLog(const StorageLogEntry& entry)
     )");
 
     query.addBindValue(entry.timestamp.toMSecsSinceEpoch());
-    query.addBindValue(entry.level);
+    query.addBindValue(static_cast<int>(entry.level));
     query.addBindValue(entry.message);
     query.addBindValue(entry.source);
     query.addBindValue(entry.category);
@@ -200,7 +201,7 @@ bool LogStorageEngine::insertLogs(const QVector<StorageLogEntry>& entries)
     int successCount = 0;
     for (const auto& entry : entries) {
         query.addBindValue(entry.timestamp.toMSecsSinceEpoch());
-        query.addBindValue(entry.level);
+        query.addBindValue(static_cast<int>(entry.level));
         query.addBindValue(entry.message);
         query.addBindValue(entry.source);
         query.addBindValue(entry.category);
@@ -227,7 +228,7 @@ bool LogStorageEngine::insertLogs(const QVector<StorageLogEntry>& entries)
 
 QVector<StorageLogEntry> LogStorageEngine::queryLogs(const QDateTime& startTime,
                                                         const QDateTime& endTime,
-                                                        int minLevel,
+                                                        LogLevel minLevel,
                                                         const QString& source,
                                                         const QString& keyword,
                                                         int limit,
@@ -255,9 +256,9 @@ QVector<StorageLogEntry> LogStorageEngine::queryLogs(const QDateTime& startTime,
         bindValues.append(endTime.toMSecsSinceEpoch());
     }
 
-    if (minLevel >= 0) {
+    if (minLevel != LogLevel::DEBUG) {
         sql += " AND level >= ?";
-        bindValues.append(minLevel);
+        bindValues.append(static_cast<int>(minLevel));
     }
 
     if (!source.isEmpty()) {
@@ -298,7 +299,7 @@ QVector<StorageLogEntry> LogStorageEngine::queryLogs(const QDateTime& startTime,
     while (query.next()) {
         StorageLogEntry entry;
         entry.timestamp = QDateTime::fromMSecsSinceEpoch(query.value(0).toLongLong());
-        entry.level = query.value(1).toInt();
+        entry.level = static_cast<LogLevel>(query.value(1).toInt());
         entry.message = query.value(2).toString();
         entry.source = query.value(3).toString();
         entry.category = query.value(4).toString();
@@ -313,7 +314,7 @@ QVector<StorageLogEntry> LogStorageEngine::queryLogs(const QDateTime& startTime,
 
 int LogStorageEngine::getLogCount(const QDateTime& startTime,
                                     const QDateTime& endTime,
-                                    int minLevel)
+                                    LogLevel minLevel)
 {
     QReadLocker locker(&m_lock);
 
@@ -335,9 +336,9 @@ int LogStorageEngine::getLogCount(const QDateTime& startTime,
         bindValues.append(endTime.toMSecsSinceEpoch());
     }
 
-    if (minLevel >= 0) {
+    if (minLevel != LogLevel::DEBUG) {
         sql += " AND level >= ?";
-        bindValues.append(minLevel);
+        bindValues.append(static_cast<int>(minLevel));
     }
 
     QSqlQuery query(m_database);
@@ -413,22 +414,4 @@ QString LogStorageEngine::getLastError() const
 {
     QReadLocker locker(&m_lock);
     return m_lastError;
-}
-
-QString LogStorageEngine::levelToString(int level)
-{
-    switch (level) {
-        case STORAGE_LOG_DEBUG:
-            return "DEBUG";
-        case STORAGE_LOG_INFO:
-            return "INFO";
-        case STORAGE_LOG_WARNING:
-            return "WARN";
-        case STORAGE_LOG_ERROR:
-            return "ERROR";
-        case STORAGE_LOG_FATAL:
-            return "FATAL";
-        default:
-            return "UNKNOWN";
-    }
 }

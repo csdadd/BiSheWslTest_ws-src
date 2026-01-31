@@ -4,29 +4,23 @@
 #include "basethread.h"
 #include "threadsafequeue.h"
 #include "logstorageengine.h"
+#include "loglevel.h"
 #include <QFile>
 #include <QTextStream>
 #include <QTextCodec>
 #include <QDateTime>
 #include <QMutex>
-
-enum LogLevel {
-    LOG_DEBUG = 0,
-    LOG_INFO = 1,
-    LOG_WARNING = 2,
-    LOG_ERROR = 3,
-    LOG_FATAL = 4
-};
+#include <memory>
 
 struct LogEntry {
     QString message;
-    int level;
+    LogLevel level;
     QDateTime timestamp;
     QString source;
     QString category;
 
-    LogEntry() : level(LOG_INFO) {}
-    LogEntry(const QString& msg, int lvl, const QDateTime& ts, const QString& src = "", const QString& cat = "")
+    LogEntry() : level(LogLevel::INFO) {}
+    LogEntry(const QString& msg, LogLevel lvl, const QDateTime& ts, const QString& src = "", const QString& cat = "")
         : message(msg), level(lvl), timestamp(ts), source(src), category(cat) {}
 };
 
@@ -35,7 +29,7 @@ class LogThread : public BaseThread
     Q_OBJECT
 
 public:
-    explicit LogThread(QObject* parent = nullptr);
+    explicit LogThread(LogStorageEngine* storageEngine, QObject* parent = nullptr);
     ~LogThread();
 
     void setLogFilePath(const QString& path);
@@ -44,7 +38,7 @@ public:
     LogStorageEngine* getStorageEngine() const;
 
 public slots:
-    void writeLog(const QString& message, int level);
+    void writeLog(const QString& message, LogLevel level);
     void writeLogEntry(const LogEntry& entry);
 
 signals:
@@ -56,10 +50,10 @@ protected:
     void cleanup() override;
 
 private:
-    void writeToFile(const QString& message, int level, const QDateTime& timestamp, const QString& source = "");
+    void writeToFile(const QString& message, LogLevel level, const QDateTime& timestamp, const QString& source = "");
     void rotateLogFile();
-    QString formatLogMessage(const QString& message, int level, const QDateTime& timestamp, const QString& source = "");
-    QString levelToString(int level);
+    void checkDateRollover();
+    QString formatLogMessage(const QString& message, LogLevel level, const QDateTime& timestamp, const QString& source = "");
     void processLogQueue();
 
 private:
@@ -73,6 +67,8 @@ private:
     int m_maxFileCount;
     QMutex m_fileMutex;
     LogStorageEngine* m_storageEngine;
+    QString m_currentLogDate;
+    int m_processCount = 0;
 
     static constexpr qint64 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024;
     static constexpr int DEFAULT_MAX_FILE_COUNT = 5;

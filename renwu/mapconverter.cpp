@@ -36,7 +36,8 @@ QImage MapConverter::convertToImage(const nav_msgs::msg::OccupancyGrid::SharedPt
         if (value == -1) {
             value = 255;
         }
-        image.bits()[i] = value;
+        // 使用scanLine替代bits()以兼容Qt6
+        image.scanLine(0)[i] = static_cast<uchar>(value);
     }
 
     qDebug() << "[MapConverter] 地图转换成功 - 尺寸:" << width << "x" << height << "分辨率:" << map->info.resolution;

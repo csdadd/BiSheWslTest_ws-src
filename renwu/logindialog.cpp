@@ -1,20 +1,30 @@
 #include "logindialog.h"
 #include "ui_logindialog.h"
 #include <QDebug>
+#include <QtConcurrent>
 
-LoginDialog::LoginDialog(UserAuthManager* authManager, QWidget* parent)
+LoginDialog::LoginDialog(UserAuthManager* authManager, QWidget *parent)
     : QDialog(parent)
     , ui(new Ui::LoginDialog)
     , m_authManager(authManager)
+    , m_loginWatcher(nullptr)
 {
     ui->setupUi(this);
-    setFixedSize(350, 250);
+    resize(DIALOG_WIDTH, DIALOG_HEIGHT);
     ui->messageLabel->hide();
     setupConnections();
 }
 
 LoginDialog::~LoginDialog()
 {
+    disconnect(m_authManager, &UserAuthManager::loginSuccess, this, &LoginDialog::onLoginSuccess);
+    disconnect(m_authManager, &UserAuthManager::loginFailed, this, &LoginDialog::onLoginFailed);
+
+    if (m_loginWatcher) {
+        m_loginWatcher->waitForFinished();
+        delete m_loginWatcher;
+    }
+
     delete ui;
 }
 
@@ -27,11 +37,19 @@ void LoginDialog::setupConnections()
 {
     connect(ui->loginButton, &QPushButton::clicked, this, &LoginDialog::onLoginClicked);
     connect(ui->cancelButton, &QPushButton::clicked, this, &LoginDialog::onCancelClicked);
-    connect(m_authManager, &UserAuthManager::loginSuccess, this, &LoginDialog::onLoginSuccess);
-    connect(m_authManager, &UserAuthManager::loginFailed, this, &LoginDialog::onLoginFailed);
+    connect(m_authManager, &UserAuthManager::loginSuccess, this, &LoginDialog::onLoginSuccess, Qt::QueuedConnection);
+    connect(m_authManager, &UserAuthManager::loginFailed, this, &LoginDialog::onLoginFailed, Qt::QueuedConnection);
 
     connect(ui->usernameEdit, &QLineEdit::returnPressed, this, &LoginDialog::onLoginClicked);
     connect(ui->passwordEdit, &QLineEdit::returnPressed, this, &LoginDialog::onLoginClicked);
+}
+
+void LoginDialog::setUiEnabled(bool enabled)
+{
+    ui->loginButton->setEnabled(enabled);
+    ui->cancelButton->setEnabled(enabled);
+    ui->usernameEdit->setEnabled(enabled);
+    ui->passwordEdit->setEnabled(enabled);
 }
 
 void LoginDialog::onLoginClicked()
@@ -52,14 +70,31 @@ void LoginDialog::onLoginClicked()
     }
 
     ui->messageLabel->hide();
-    ui->loginButton->setEnabled(false);
-    ui->cancelButton->setEnabled(false);
+    setUiEnabled(false);
 
-    if (m_authManager->login(username, password)) {
-        accept();
-    } else {
-        ui->loginButton->setEnabled(true);
-        ui->cancelButton->setEnabled(true);
+    // 使用QtConcurrent实现异步登录，避免UI阻塞
+    if (!m_loginWatcher) {
+        m_loginWatcher = new QFutureWatcher<bool>(this);
+        connect(m_loginWatcher, &QFutureWatcher<bool>::finished, this, &LoginDialog::onLoginFinished);
+    }
+
+    QFuture<bool> future = QtConcurrent::run([this, username, password]() {
+        return m_authManager->login(username, password);
+    });
+
+    m_loginWatcher->setFuture(future);
+}
+
+void LoginDialog::onLoginFinished()
+{
+    bool success = m_loginWatcher->result();
+
+    if (!success) {
+        // 登录失败，恢复UI
+        setUiEnabled(true);
+        ui->messageLabel->setText(m_authManager->getLastError());
+        ui->messageLabel->show();
+        qDebug() << "[LoginDialog] Login failed:" << m_authManager->getLastError();
     }
 }
 
@@ -71,14 +106,14 @@ void LoginDialog::onCancelClicked()
 void LoginDialog::onLoginSuccess(const User& user)
 {
     m_currentUser = user;
-    qDebug() << "[LoginDialog] Login successful for user:" << user.username;
+    qDebug() << "[LoginDialog] Login successful for user:" << user.getUsername();
+    accept();
 }
 
 void LoginDialog::onLoginFailed(const QString& reason)
 {
     ui->messageLabel->setText(reason);
     ui->messageLabel->show();
-    ui->loginButton->setEnabled(true);
-    ui->cancelButton->setEnabled(true);
+    setUiEnabled(true);
     qDebug() << "[LoginDialog] Login failed:" << reason;
 }

@@ -29,42 +29,32 @@ MapWidget::MapWidget(QWidget* parent)
     setResizeAnchor(QGraphicsView::AnchorUnderMouse);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    // 初始化标记项对象池
+    m_markerPool.reserve(MARKER_POOL_SIZE);
+    m_markerPoolUsed.reserve(MARKER_POOL_SIZE);
+    for (int i = 0; i < MARKER_POOL_SIZE; ++i) {
+        QGraphicsEllipseItem* item = m_scene->addEllipse(
+            -5, -5, 10, 10,
+            QPen(Qt::black),
+            QBrush(Qt::black)
+        );
+        item->setVisible(false);
+        m_markerPool.append(item);
+        m_markerPoolUsed.append(false);
+    }
 }
 
-// 析构函数：清理资源，删除机器人和地图项
+// 析构函数：清理资源
+// QGraphicsScene 会自动清理所有 QGraphicsItem（通过父子关系）
 MapWidget::~MapWidget()
 {
     if (m_zoomAnimation) {
         m_zoomAnimation->stop();
-        delete m_zoomAnimation;
-        m_zoomAnimation = nullptr;
     }
 
     if (m_scrollAnimation) {
         m_scrollAnimation->stop();
-        delete m_scrollAnimation;
-        m_scrollAnimation = nullptr;
-    }
-
-    clearMarkers();
-    clearStatusIndicators();
-
-    if (m_robotIconItem) {
-        m_scene->removeItem(m_robotIconItem);
-        delete m_robotIconItem;
-        m_robotIconItem = nullptr;
-    }
-
-    if (m_robotItem) {
-        m_scene->removeItem(m_robotItem);
-        delete m_robotItem;
-        m_robotItem = nullptr;
-    }
-
-    if (m_mapPixmapItem) {
-        m_scene->removeItem(m_mapPixmapItem);
-        delete m_mapPixmapItem;
-        m_mapPixmapItem = nullptr;
     }
 }
 
@@ -379,6 +369,38 @@ void MapWidget::setRobotIcon(const QPixmap& icon)
     qDebug() << "[MapWidget] 设置机器人图标成功 - 尺寸:" << icon.width() << "x" << icon.height();
 }
 
+// 从对象池获取标记项
+QGraphicsEllipseItem* MapWidget::acquireMarkerItem()
+{
+    for (int i = 0; i < m_markerPool.size(); ++i) {
+        if (!m_markerPoolUsed[i]) {
+            m_markerPoolUsed[i] = true;
+            m_markerPool[i]->setVisible(true);
+            return m_markerPool[i];
+        }
+    }
+    // 池已满，创建新项（备用方案）
+    QGraphicsEllipseItem* item = m_scene->addEllipse(
+        -5, -5, 10, 10,
+        QPen(Qt::black),
+        QBrush(Qt::black)
+    );
+    m_markerPool.append(item);
+    m_markerPoolUsed.append(true);
+    return item;
+}
+
+// 释放标记项回对象池
+void MapWidget::releaseMarkerItem(QGraphicsEllipseItem* item)
+{
+    int index = m_markerPool.indexOf(item);
+    if (index >= 0) {
+        m_markerPoolUsed[index] = false;
+        item->setVisible(false);
+        item->setToolTip("");
+    }
+}
+
 void MapWidget::addMarker(const MapMarker& marker)
 {
     if (!m_mapPixmapItem) {
@@ -396,11 +418,10 @@ void MapWidget::addMarker(const MapMarker& marker)
     QPointF imagePos = MapConverter::mapToImage(
         marker.position.x(), marker.position.y(), m_resolution, m_originX, m_originY);
 
-    QGraphicsEllipseItem* markerItem = m_scene->addEllipse(
-        -5, -5, 10, 10,
-        QPen(marker.color),
-        QBrush(marker.color)
-    );
+    // 从对象池获取标记项
+    QGraphicsEllipseItem* markerItem = acquireMarkerItem();
+    markerItem->setPen(QPen(marker.color));
+    markerItem->setBrush(QBrush(marker.color));
     markerItem->setPos(imagePos);
     markerItem->setZValue(2);
     markerItem->setToolTip(marker.name + ": " + marker.description);
@@ -415,8 +436,7 @@ void MapWidget::removeMarker(const QString& name)
 
     for (int i = 0; i < m_markerItems.size(); ++i) {
         if (m_markerItems[i]->toolTip().startsWith(name + ":")) {
-            m_scene->removeItem(m_markerItems[i]);
-            delete m_markerItems[i];
+            releaseMarkerItem(m_markerItems[i]);
             m_markerItems.removeAt(i);
             qDebug() << "[MapWidget] 从场景中删除标记点成功 - 名称:" << name;
             return;
@@ -427,8 +447,7 @@ void MapWidget::removeMarker(const QString& name)
 void MapWidget::clearMarkers()
 {
     for (QGraphicsEllipseItem* item : m_markerItems) {
-        m_scene->removeItem(item);
-        delete item;
+        releaseMarkerItem(item);
     }
     m_markerItems.clear();
     m_markerManager.clear();

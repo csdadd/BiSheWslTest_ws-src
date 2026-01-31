@@ -1,4 +1,5 @@
 #include "testlogquerytask.h"
+#include "loglevel.h"
 
 static int registerMetaTypes() {
     qRegisterMetaType<StorageLogEntry>("StorageLogEntry");
@@ -26,7 +27,7 @@ void TestLogQueryTask::init()
     m_engine->initialize(m_testDbPath);
 
     for (int i = 0; i < 20; ++i) {
-        StorageLogEntry entry(QString("Message %1").arg(i), i % 5, QDateTime::currentDateTime(), QString("Source%1").arg(i % 3));
+        StorageLogEntry entry(QString("Message %1").arg(i), static_cast<LogLevel>(i % 5), QDateTime::currentDateTime(), QString("Source%1").arg(i % 3));
         m_engine->insertLog(entry);
     }
 }
@@ -117,7 +118,7 @@ void TestLogQueryTask::testRunWithError()
 void TestLogQueryTask::testRunWithLimit()
 {
     QDateTime now = QDateTime::currentDateTime();
-    LogQueryTask* task = new LogQueryTask(m_engine, now.addSecs(-3600), now, -1, "", "", 5);
+    LogQueryTask* task = new LogQueryTask(m_engine, now.addSecs(-3600), now, LogLevel::DEBUG, "", "", 5);
     task->setAutoDelete(false);
 
     QSignalSpy spy(task, &LogQueryTask::queryCompleted);
@@ -136,7 +137,7 @@ void TestLogQueryTask::testRunWithLimit()
 void TestLogQueryTask::testRunWithOffset()
 {
     QDateTime now = QDateTime::currentDateTime();
-    LogQueryTask* task = new LogQueryTask(m_engine, now.addSecs(-3600), now, -1, "", "", -1, 10);
+    LogQueryTask* task = new LogQueryTask(m_engine, now.addSecs(-3600), now, LogLevel::DEBUG, "", "", -1, 10);
     task->setAutoDelete(false);
 
     QSignalSpy spy(task, &LogQueryTask::queryCompleted);
@@ -155,7 +156,7 @@ void TestLogQueryTask::testRunWithOffset()
 void TestLogQueryTask::testRunWithMultipleFilters()
 {
     QDateTime now = QDateTime::currentDateTime();
-    LogQueryTask* task = new LogQueryTask(m_engine, now.addSecs(-3600), now, STORAGE_LOG_ERROR, "Source1", "Message");
+    LogQueryTask* task = new LogQueryTask(m_engine, now.addSecs(-3600), now, LOG_ERROR, "Source1", "Message");
     task->setAutoDelete(false);
 
     QSignalSpy spy(task, &LogQueryTask::queryCompleted);

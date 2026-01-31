@@ -81,7 +81,7 @@ void TestUserAuthManager::testLoginWithInactiveUser()
 {
     m_authManager->createUser("testuser", "password123", UserPermission::ADMIN);
     User user = m_storageEngine->getUserByUsername("testuser");
-    user.active = false;
+    user.setActive(false);
     m_storageEngine->updateUser(user);
 
     QVERIFY(!m_authManager->login("testuser", "password123"));
@@ -112,7 +112,7 @@ void TestUserAuthManager::testGetCurrentUser()
     m_authManager->login("testuser", "password123");
 
     User user = m_authManager->getCurrentUser();
-    QVERIFY(user.username == "testuser");
+    QVERIFY(user.getUsername() == "testuser");
 }
 
 void TestUserAuthManager::testGetCurrentUsername()
@@ -220,7 +220,7 @@ void TestUserAuthManager::testUpdateUserPermission()
     QVERIFY(m_authManager->updateUserPermission("testuser", UserPermission::ADMIN));
 
     User user = m_storageEngine->getUserByUsername("testuser");
-    QVERIFY(user.permission == UserPermission::ADMIN);
+    QVERIFY(user.getPermission() == UserPermission::ADMIN);
 }
 
 void TestUserAuthManager::testGetAllUsers()

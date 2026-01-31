@@ -29,20 +29,20 @@ ChangePasswordDialog::ChangePasswordDialog(Mode mode, UserAuthManager* authManag
 
 ChangePasswordDialog::~ChangePasswordDialog()
 {
+    disconnect(ui->okButton, &QPushButton::clicked, this, &ChangePasswordDialog::onOkClicked);
+    disconnect(ui->cancelButton, &QPushButton::clicked, this, &ChangePasswordDialog::onCancelClicked);
     delete ui;
 }
 
 void ChangePasswordDialog::setupUI()
 {
     if (m_mode == Mode::AdminReset) {
-        // 管理员重置模式：隐藏旧密码输入框
         ui->oldPasswordLabel->hide();
         ui->oldPasswordEdit->hide();
-        setFixedSize(350, 200);
+        resize(DIALOG_WIDTH, DIALOG_HEIGHT_WITHOUT_OLD_PASSWORD);
         qDebug() << "[ChangePasswordDialog] 设置为管理员重置模式";
     } else {
-        // 用户自己修改模式：显示所有字段
-        setFixedSize(350, 250);
+        resize(DIALOG_WIDTH, DIALOG_HEIGHT_WITH_OLD_PASSWORD);
         qDebug() << "[ChangePasswordDialog] 设置为用户自改模式";
     }
 }

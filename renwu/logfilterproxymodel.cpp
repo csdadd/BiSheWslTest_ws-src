@@ -70,6 +70,9 @@ QDateTime LogFilterProxyModel::endTime() const
 void LogFilterProxyModel::setRegExpFilter(const QString& pattern)
 {
     m_regExpFilter = pattern;
+    if (!pattern.isEmpty()) {
+        m_cachedRegExp = QRegularExpression(pattern);
+    }
     invalidateFilter();
 }
 
@@ -134,11 +137,10 @@ bool LogFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& sou
     }
 
     if (m_useRegExp && !m_regExpFilter.isEmpty()) {
-        QRegularExpression regExp(m_regExpFilter);
-        if (!regExp.isValid()) {
+        if (!m_cachedRegExp.isValid()) {
             return false;
         }
-        if (!regExp.match(message).hasMatch()) {
+        if (!m_cachedRegExp.match(message).hasMatch()) {
             return false;
         }
     }

@@ -1,4 +1,5 @@
 #include "robotstatusthread.h"
+#include "geometryutils.h"
 #include <cmath>
 #include <QDebug>
 
@@ -27,7 +28,7 @@ void RobotStatusThread::initialize()
         m_executor->add_node(m_rosNode);
 
         qDebug() << "[RobotStatusThread] 初始化成功";
-        emit logMessage("RobotStatusThread initialized successfully", 0);
+        emit logMessage("RobotStatusThread initialized successfully", LogLevel::INFO);
         emit connectionStateChanged(true);
 
     } catch (const std::exception& e) {
@@ -88,11 +89,10 @@ void RobotStatusThread::subscribeROSTopics()
 
 void RobotStatusThread::process()
 {
-    static int count = 0;
-    count++;
-    if (count >= 100) {
+    m_processCount++;
+    if (m_processCount >= 100) {
         qDebug() << "[RobotStatusThread] 正在运行 - 获取电池、位置、里程计和诊断信息";
-        count = 0;
+        m_processCount = 0;
     }
     if (m_executor && m_rosNode) {
         m_executor->spin_some();
@@ -108,7 +108,7 @@ void RobotStatusThread::cleanup()
     m_rosNode.reset();
 
     emit connectionStateChanged(false);
-    emit logMessage("RobotStatusThread cleanup completed", 0);
+    emit logMessage("RobotStatusThread cleanup completed", LogLevel::INFO);
 }
 
 void RobotStatusThread::processBatteryData(const std_msgs::msg::Float32::SharedPtr msg)
@@ -121,19 +121,14 @@ void RobotStatusThread::processBatteryData(const std_msgs::msg::Float32::SharedP
     emit batteryStatusReceived(m_batteryVoltage, percentage);
 
     QString logMsg = QString("Battery: %1V (%2%)").arg(m_batteryVoltage, 0, 'f', 2).arg(percentage, 0, 'f', 1);
-    emit logMessage(logMsg, 0);
+    emit logMessage(logMsg, LogLevel::INFO);
 }
 
 void RobotStatusThread::processPositionData(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
 {
     double x = msg->pose.pose.position.x;
     double y = msg->pose.pose.position.y;
-    double yaw = getYawFromQuaternion(
-        msg->pose.pose.orientation.x,
-        msg->pose.pose.orientation.y,
-        msg->pose.pose.orientation.z,
-        msg->pose.pose.orientation.w
-    );
+    double yaw = GeometryUtils::quaternionToYaw(msg->pose.pose.orientation);
 
     emit positionReceived(x, y, yaw);
 }
@@ -142,12 +137,7 @@ void RobotStatusThread::processOdometryData(const nav_msgs::msg::Odometry::Share
 {
     double x = msg->pose.pose.position.x;
     double y = msg->pose.pose.position.y;
-    double yaw = getYawFromQuaternion(
-        msg->pose.pose.orientation.x,
-        msg->pose.pose.orientation.y,
-        msg->pose.pose.orientation.z,
-        msg->pose.pose.orientation.w
-    );
+    double yaw = GeometryUtils::quaternionToYaw(msg->pose.pose.orientation);
 
     double vx = msg->twist.twist.linear.x;
     double vy = msg->twist.twist.linear.y;
@@ -158,21 +148,19 @@ void RobotStatusThread::processOdometryData(const nav_msgs::msg::Odometry::Share
 
 void RobotStatusThread::processDiagnosticsData(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg)
 {
-    static bool firstDiagnostics = true;
-    
     if (msg->status.empty()) {
-        if (firstDiagnostics) {
+        if (m_firstDiagnostics) {
             emit diagnosticsReceived("System", 0, "系统初始化中 - 等待诊断数据...");
-            firstDiagnostics = false;
+            m_firstDiagnostics = false;
         } else {
             emit diagnosticsReceived("System", 0, "暂无诊断数据 - 系统正常运行");
         }
         return;
     }
-    
-    if (firstDiagnostics) {
+
+    if (m_firstDiagnostics) {
         emit diagnosticsReceived("System", 0, "系统初始化完成 - 诊断数据已接收");
-        firstDiagnostics = false;
+        m_firstDiagnostics = false;
     }
 
     for (const auto& status : msg->status) {
@@ -191,11 +179,4 @@ void RobotStatusThread::processTimeData(const sensor_msgs::msg::TimeReference::S
     refTime.setMSecsSinceEpoch(msg->header.stamp.nanosec / 1000000);
 
     emit systemTimeReceived(refTime.toString("yyyy-MM-dd hh:mm:ss"));
-}
-
-double RobotStatusThread::getYawFromQuaternion(double x, double y, double z, double w)
-{
-    double siny_cosp = 2.0 * (w * z + x * y);
-    double cosy_cosp = 1.0 - 2.0 * (y * y + z * z);
-    return std::atan2(siny_cosp, cosy_cosp);
 }

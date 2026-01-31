@@ -6,31 +6,43 @@ UserAuthManager::UserAuthManager(QObject* parent)
     , m_storageEngine(nullptr)
     , m_initialized(false)
     , m_loggedIn(false)
+    , m_sessionTimeoutTimer(new QTimer(this))
 {
+    connect(m_sessionTimeoutTimer, &QTimer::timeout, this, &UserAuthManager::onSessionTimeout);
 }
 
 UserAuthManager::~UserAuthManager()
 {
-    logout();
+    disconnect(m_sessionTimeoutTimer, &QTimer::timeout, this, &UserAuthManager::onSessionTimeout);
+    if (m_loggedIn) {
+        m_currentUser = User();
+        m_loggedIn = false;
+        m_sessionTimeoutTimer->stop();
+    }
 }
 
 bool UserAuthManager::initialize(UserStorageEngine* storageEngine)
 {
+    if (m_initialized) {
+        qWarning() << "[UserAuthManager] 警告：initialize()被重复调用，认证管理器已经初始化";
+        return true;
+    }
+
     if (!storageEngine) {
-        m_lastError = "Storage engine is null";
+        m_lastError = "存储引擎为空";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     if (!storageEngine->isInitialized()) {
-        m_lastError = "Storage engine not initialized";
+        m_lastError = "存储引擎未初始化";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     m_storageEngine = storageEngine;
     m_initialized = true;
-    qDebug() << "[UserAuthManager] Initialized successfully";
+    qDebug() << "[UserAuthManager] 认证管理器初始化完成";
     return true;
 }
 
@@ -50,101 +62,164 @@ QString UserAuthManager::hashPassword(const QString& password)
 
 bool UserAuthManager::verifyPassword(const QString& password, const QString& passwordHash)
 {
-    QString hashedInput = hashPassword(password);
-    return hashedInput == passwordHash;
+    return UserStorageEngine::verifyPassword(password, passwordHash);
 }
 
 bool UserAuthManager::login(const QString& username, const QString& password)
 {
+    QMutexLocker locker(&m_mutex);
+
     if (!m_initialized) {
-        m_lastError = "Auth manager not initialized";
+        m_lastError = "认证管理器未初始化";
         emit loginFailed(m_lastError);
         return false;
     }
 
     if (!validateUsername(username)) {
-        m_lastError = "Invalid username format";
+        m_lastError = "用户名格式无效";
         emit loginFailed(m_lastError);
         return false;
     }
 
     if (!validatePassword(password)) {
-        m_lastError = "Invalid password format";
+        m_lastError = "密码格式无效";
         emit loginFailed(m_lastError);
         return false;
+    }
+
+    LoginAttempt& attempt = m_loginAttempts[username];
+
+    if (attempt.locked) {
+        if (QDateTime::currentDateTime() < attempt.lockUntil) {
+            int remainingMinutes = QDateTime::currentDateTime().secsTo(attempt.lockUntil) / 60;
+            m_lastError = QString("账户已锁定，请%1分钟后再试").arg(remainingMinutes);
+            emit loginFailed(m_lastError);
+            return false;
+        } else {
+            attempt.locked = false;
+            attempt.count = 0;
+        }
     }
 
     User user = m_storageEngine->getUserByUsername(username);
 
-    if (user.id == 0) {
-        m_lastError = "User not found";
+    if (user.getId() == 0 || !user.isActive()) {
+        m_lastError = "用户名或密码错误";
         emit loginFailed(m_lastError);
         return false;
     }
 
-    if (!user.active) {
-        m_lastError = "User account is disabled";
+    if (!verifyPassword(password, user.getPasswordHash())) {
+        attempt.count++;
+        attempt.lastAttempt = QDateTime::currentDateTime();
+
+        if (attempt.count >= MAX_LOGIN_ATTEMPTS) {
+            attempt.locked = true;
+            attempt.lockUntil = QDateTime::currentDateTime().addSecs(LOCK_DURATION_MINUTES * 60);
+            m_lastError = QString("登录失败次数过多，账户已被锁定%1分钟").arg(LOCK_DURATION_MINUTES);
+        } else {
+            int remainingAttempts = MAX_LOGIN_ATTEMPTS - attempt.count;
+            m_lastError = QString("用户名或密码错误（剩余尝试次数：%1）").arg(remainingAttempts);
+        }
+
         emit loginFailed(m_lastError);
         return false;
     }
 
-    if (!verifyPassword(password, user.passwordHash)) {
-        m_lastError = "Incorrect password";
-        emit loginFailed(m_lastError);
-        return false;
-    }
+    attempt.count = 0;
+    attempt.locked = false;
 
     m_currentUser = user;
     m_loggedIn = true;
 
-    m_storageEngine->updateLastLogin(user.id);
+    if (!m_storageEngine->updateLastLogin(user.getId())) {
+        qWarning() << "[UserAuthManager] 警告：更新最后登录时间失败，但登录仍成功";
+    }
 
-    qDebug() << "[UserAuthManager] User logged in:" << username;
+    m_sessionTimeoutTimer->start(SESSION_TIMEOUT_MINUTES * 60 * 1000);
     emit loginSuccess(m_currentUser);
     return true;
 }
 
 bool UserAuthManager::logout()
 {
+    QMutexLocker locker(&m_mutex);
+
     if (!m_loggedIn) {
         return true;
     }
 
-    QString username = m_currentUser.username;
+    QString username = m_currentUser.getUsername();
     m_currentUser = User();
     m_loggedIn = false;
+    m_sessionTimeoutTimer->stop();
 
-    qDebug() << "[UserAuthManager] User logged out:" << username;
     emit logoutSuccess();
     return true;
 }
 
+void UserAuthManager::onSessionTimeout()
+{
+    QMutexLocker locker(&m_mutex);
+
+    if (m_loggedIn) {
+        QString username = m_currentUser.getUsername();
+        m_currentUser = User();
+        m_loggedIn = false;
+        m_sessionTimeoutTimer->stop();
+
+        emit sessionTimeout();
+    }
+}
+
 bool UserAuthManager::isLoggedIn() const
 {
+    QMutexLocker locker(&m_mutex);
     return m_loggedIn;
 }
 
 User UserAuthManager::getCurrentUser() const
 {
+    QMutexLocker locker(&m_mutex);
     return m_currentUser;
 }
 
 QString UserAuthManager::getCurrentUsername() const
 {
-    return m_currentUser.username;
+    QMutexLocker locker(&m_mutex);
+    return m_currentUser.getUsername();
 }
 
 UserPermission UserAuthManager::getCurrentPermission() const
 {
-    return m_currentUser.permission;
+    QMutexLocker locker(&m_mutex);
+    return m_currentUser.getPermission();
 }
 
 bool UserAuthManager::hasPermission(UserPermission requiredPermission) const
 {
+    QMutexLocker locker(&m_mutex);
     if (!m_loggedIn) {
         return false;
     }
-    return m_currentUser.permission >= requiredPermission;
+
+    // 显式检查权限级别,不依赖枚举顺序
+    UserPermission currentPermission = m_currentUser.getPermission();
+
+    switch (requiredPermission) {
+        case UserPermission::VIEWER:
+            // 所有用户都有VIEWER权限
+            return true;
+        case UserPermission::OPERATOR:
+            // OPERATOR和ADMIN有此权限
+            return currentPermission == UserPermission::OPERATOR || currentPermission == UserPermission::ADMIN;
+        case UserPermission::ADMIN:
+            // 只有ADMIN有此权限
+            return currentPermission == UserPermission::ADMIN;
+        default:
+            qWarning() << "[UserAuthManager] 警告：无效的权限值";
+            return false;
+    }
 }
 
 bool UserAuthManager::canView() const
@@ -164,54 +239,57 @@ bool UserAuthManager::canAdmin() const
 
 bool UserAuthManager::changePassword(const QString& oldPassword, const QString& newPassword)
 {
+    QMutexLocker locker(&m_mutex);
+
     if (!m_loggedIn) {
-        m_lastError = "Not logged in";
+        m_lastError = "未登录";
         emit errorOccurred(m_lastError);
         return false;
     }
 
-    if (!verifyPassword(oldPassword, m_currentUser.passwordHash)) {
-        m_lastError = "Old password is incorrect";
+    if (!verifyPassword(oldPassword, m_currentUser.getPasswordHash())) {
+        m_lastError = "旧密码不正确";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     if (!validatePassword(newPassword)) {
-        m_lastError = "New password does not meet requirements";
+        m_lastError = "新密码不符合要求";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     QString newPasswordHash = hashPassword(newPassword);
 
-    if (!m_storageEngine->changePassword(m_currentUser.id, newPasswordHash)) {
+    if (!m_storageEngine->changePassword(m_currentUser.getId(), newPasswordHash)) {
         m_lastError = m_storageEngine->getLastError();
         emit errorOccurred(m_lastError);
         return false;
     }
 
-    m_currentUser.passwordHash = newPasswordHash;
-    qDebug() << "[UserAuthManager] Password changed for user:" << m_currentUser.username;
+    m_currentUser.setPasswordHash(newPasswordHash);
     emit passwordChanged();
     return true;
 }
 
 bool UserAuthManager::resetPassword(const QString& username, const QString& newPassword)
 {
+    QMutexLocker locker(&m_mutex);
+
     if (!canAdmin()) {
-        m_lastError = "Insufficient permissions";
+        m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     if (!validatePassword(newPassword)) {
-        m_lastError = "New password does not meet requirements";
+        m_lastError = "新密码不符合要求";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     if (!m_storageEngine->userExists(username)) {
-        m_lastError = "User not found";
+        m_lastError = "用户不存在";
         emit errorOccurred(m_lastError);
         return false;
     }
@@ -224,43 +302,44 @@ bool UserAuthManager::resetPassword(const QString& username, const QString& newP
         return false;
     }
 
-    qDebug() << "[UserAuthManager] Password reset for user:" << username;
     emit passwordChanged();
     return true;
 }
 
 bool UserAuthManager::createUser(const QString& username, const QString& password, UserPermission permission)
 {
+    QMutexLocker locker(&m_mutex);
+
     if (!canAdmin()) {
-        m_lastError = "Insufficient permissions";
+        m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     if (!validateUsername(username)) {
-        m_lastError = "Invalid username format";
+        m_lastError = "用户名格式无效";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     if (!validatePassword(password)) {
-        m_lastError = "Invalid password format";
+        m_lastError = "密码格式无效";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     if (m_storageEngine->userExists(username)) {
-        m_lastError = "User already exists";
+        m_lastError = "用户已存在";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     User newUser;
-    newUser.username = username;
-    newUser.passwordHash = hashPassword(password);
-    newUser.permission = permission;
-    newUser.createdAt = QDateTime::currentDateTime();
-    newUser.active = true;
+    newUser.setUsername(username);
+    newUser.setPasswordHash(hashPassword(password));
+    newUser.setPermission(permission);
+    newUser.setCreatedAt(QDateTime::currentDateTime());
+    newUser.setActive(true);
 
     if (!m_storageEngine->insertUser(newUser)) {
         m_lastError = m_storageEngine->getLastError();
@@ -268,27 +347,28 @@ bool UserAuthManager::createUser(const QString& username, const QString& passwor
         return false;
     }
 
-    qDebug() << "[UserAuthManager] User created:" << username;
     emit userCreated(newUser);
     return true;
 }
 
 bool UserAuthManager::deleteUser(const QString& username)
 {
+    QMutexLocker locker(&m_mutex);
+
     if (!canAdmin()) {
-        m_lastError = "Insufficient permissions";
+        m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return false;
     }
 
-    if (username == m_currentUser.username) {
-        m_lastError = "Cannot delete your own account";
+    if (username == m_currentUser.getUsername()) {
+        m_lastError = "不能删除自己的账户";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     if (!m_storageEngine->userExists(username)) {
-        m_lastError = "User not found";
+        m_lastError = "用户不存在";
         emit errorOccurred(m_lastError);
         return false;
     }
@@ -299,34 +379,35 @@ bool UserAuthManager::deleteUser(const QString& username)
         return false;
     }
 
-    qDebug() << "[UserAuthManager] User deleted:" << username;
     emit userDeleted(username);
     return true;
 }
 
 bool UserAuthManager::updateUserPermission(const QString& username, UserPermission newPermission)
 {
+    QMutexLocker locker(&m_mutex);
+
     if (!canAdmin()) {
-        m_lastError = "Insufficient permissions";
+        m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return false;
     }
 
-    if (username == m_currentUser.username) {
-        m_lastError = "Cannot change your own permission";
+    if (username == m_currentUser.getUsername()) {
+        m_lastError = "不能修改自己的权限";
         emit errorOccurred(m_lastError);
         return false;
     }
 
     User user = m_storageEngine->getUserByUsername(username);
 
-    if (user.id == 0) {
-        m_lastError = "User not found";
+    if (user.getId() == 0) {
+        m_lastError = "用户不存在";
         emit errorOccurred(m_lastError);
         return false;
     }
 
-    user.permission = newPermission;
+    user.setPermission(newPermission);
 
     if (!m_storageEngine->updateUser(user)) {
         m_lastError = m_storageEngine->getLastError();
@@ -334,15 +415,22 @@ bool UserAuthManager::updateUserPermission(const QString& username, UserPermissi
         return false;
     }
 
-    qDebug() << "[UserAuthManager] Permission updated for user:" << username;
     emit permissionChanged(username, newPermission);
     return true;
 }
 
 QVector<User> UserAuthManager::getAllUsers()
 {
+    QMutexLocker locker(&m_mutex);
+    
+    if (!m_storageEngine) {
+        m_lastError = "存储引擎未初始化";
+        emit errorOccurred(m_lastError);
+        return QVector<User>();
+    }
+    
     if (!canAdmin()) {
-        m_lastError = "Insufficient permissions";
+        m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return QVector<User>();
     }
@@ -365,7 +453,21 @@ bool UserAuthManager::validatePassword(const QString& password)
         return false;
     }
 
-    return true;
+    bool hasUpper = false;
+    bool hasLower = false;
+    bool hasDigit = false;
+
+    for (const QChar& c : password) {
+        if (c.isUpper()) {
+            hasUpper = true;
+        } else if (c.isLower()) {
+            hasLower = true;
+        } else if (c.isDigit()) {
+            hasDigit = true;
+        }
+    }
+
+    return hasUpper && hasLower && hasDigit;
 }
 
 bool UserAuthManager::validateUsername(const QString& username)

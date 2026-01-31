@@ -19,9 +19,13 @@ NavigationActionClient::NavigationActionClient(QObject* parent)
 
 NavigationActionClient::~NavigationActionClient()
 {
-    if (m_isNavigating && m_goalHandle) {
+    QMutexLocker locker(&m_mutex);
+
+    if (m_isNavigating.load() && m_goalHandle) {
         qWarning() << "[NavigationActionClient] 析构函数中取消导航目标";
-        cancelGoal();
+        auto cancel_future = m_actionClient->async_cancel_goal(m_goalHandle);
+        // 使用超时等待，避免无限阻塞
+        cancel_future.wait_for(std::chrono::milliseconds(CANCEL_TIMEOUT_MS));
     }
     qDebug() << "[NavigationActionClient] 导航动作客户端已销毁";
 }
@@ -63,38 +67,50 @@ bool NavigationActionClient::sendGoal(double x, double y, double yaw)
 
 bool NavigationActionClient::cancelGoal()
 {
-    if (!m_isNavigating || !m_goalHandle) {
+    QMutexLocker locker(&m_mutex);
+
+    if (!m_isNavigating.load() || !m_goalHandle) {
         qWarning() << "[NavigationActionClient] 尝试取消目标，但当前没有活动导航";
         return false;
     }
 
     qDebug() << "[NavigationActionClient] 正在取消导航目标";
     auto cancel_future = m_actionClient->async_cancel_goal(m_goalHandle);
-    cancel_future.wait();
+    // 使用超时等待，避免无限阻塞 (P0-010修复)
+    auto status = cancel_future.wait_for(std::chrono::milliseconds(CANCEL_TIMEOUT_MS));
+
+    if (status == std::future_status::timeout) {
+        qWarning() << "[NavigationActionClient] 取消导航目标超时";
+        return false;
+    }
+
     return true;
 }
 
 bool NavigationActionClient::isNavigating() const
 {
-    return m_isNavigating;
+    return m_isNavigating.load();
 }
 
 geometry_msgs::msg::PoseStamped NavigationActionClient::getCurrentGoal() const
 {
+    QMutexLocker locker(&m_mutex);
     return m_currentGoal;
 }
 
 void NavigationActionClient::goalResponseCallback(std::shared_ptr<rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>> goalHandle)
 {
+    QMutexLocker locker(&m_mutex);
+
     if (!goalHandle) {
-        m_isNavigating = false;
+        m_isNavigating.store(false);
         qCritical() << "[NavigationActionClient] 导航目标被服务器拒绝";
         emit goalRejected("Goal was rejected by server");
         return;
     }
 
     m_goalHandle = goalHandle;
-    m_isNavigating = true;
+    m_isNavigating.store(true);
     qDebug() << "[NavigationActionClient] 导航目标已被接受";
     emit goalAccepted();
 }
@@ -105,15 +121,18 @@ void NavigationActionClient::feedbackCallback(std::shared_ptr<rclcpp_action::Cli
     double distanceRemaining = feedback->distance_remaining;
     double navigationTime = feedback->navigation_time.sec + feedback->navigation_time.nanosec / 1e9;
     int recoveries = feedback->number_of_recoveries;
+    double estimatedTimeRemaining = feedback->estimated_time_remaining.sec + feedback->estimated_time_remaining.nanosec / 1e9;
 
-    qDebug() << "[NavigationActionClient] 导航反馈 - 剩余距离:" << distanceRemaining << "m, 已用时间:" << navigationTime << "s, 恢复次数:" << recoveries;
+    qDebug() << "[NavigationActionClient] 导航反馈 - 剩余距离:" << distanceRemaining << "m, 已用时间:" << navigationTime << "s, 恢复次数:" << recoveries << "预计剩余时间:" << estimatedTimeRemaining << "s";
 
-    emit feedbackReceived(distanceRemaining, navigationTime, recoveries);
+    emit feedbackReceived(distanceRemaining, navigationTime, recoveries, estimatedTimeRemaining);
 }
 
 void NavigationActionClient::resultCallback(const rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>::WrappedResult& result)
 {
-    m_isNavigating = false;
+    QMutexLocker locker(&m_mutex);
+
+    m_isNavigating.store(false);
     m_goalHandle.reset();
 
     switch (result.code) {

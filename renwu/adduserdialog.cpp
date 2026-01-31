@@ -9,7 +9,7 @@ AddUserDialog::AddUserDialog(UserAuthManager* authManager, QWidget* parent)
     , m_authManager(authManager)
 {
     ui->setupUi(this);
-    setFixedSize(350, 300);
+    resize(DIALOG_WIDTH, DIALOG_HEIGHT);
 
     qDebug() << "[AddUserDialog] 构造函数";
 
@@ -32,6 +32,8 @@ AddUserDialog::AddUserDialog(UserAuthManager* authManager, QWidget* parent)
 
 AddUserDialog::~AddUserDialog()
 {
+    disconnect(ui->okButton, &QPushButton::clicked, this, &AddUserDialog::onOkClicked);
+    disconnect(ui->cancelButton, &QPushButton::clicked, this, &AddUserDialog::onCancelClicked);
     delete ui;
 }
 
@@ -46,9 +48,9 @@ void AddUserDialog::onOkClicked()
     QString username = ui->usernameEdit->text().trimmed();
     QString password = ui->passwordEdit->text();
     QString confirmPassword = ui->confirmPasswordEdit->text();
-    UserPermission permission = static_cast<UserPermission>(ui->permissionCombo->currentData().toInt());
+    int permValue = ui->permissionCombo->currentData().toInt();
 
-    qDebug() << "[AddUserDialog] 尝试创建用户 - 用户名:" << username << "权限:" << static_cast<int>(permission);
+    qDebug() << "[AddUserDialog] 尝试创建用户 - 用户名:" << username << "权限:" << permValue;
 
     if (username.isEmpty()) {
         QMessageBox::warning(this, "错误", "请输入用户名");
@@ -64,6 +66,13 @@ void AddUserDialog::onOkClicked()
         QMessageBox::warning(this, "错误", "两次输入的密码不一致");
         return;
     }
+
+    if (permValue < 0 || permValue > 2) {
+        QMessageBox::warning(this, "错误", "无效的权限值");
+        return;
+    }
+
+    UserPermission permission = static_cast<UserPermission>(permValue);
 
     if (m_authManager->createUser(username, password, permission)) {
         qDebug() << "[AddUserDialog] 用户创建成功:" << username;

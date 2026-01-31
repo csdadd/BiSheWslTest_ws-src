@@ -5,6 +5,9 @@
 #include <QString>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QMutex>
+#include <QHash>
+#include <QTimer>
 #include "user.h"
 #include "userstorageengine.h"
 
@@ -16,6 +19,12 @@ public:
     explicit UserAuthManager(QObject* parent = nullptr);
     ~UserAuthManager();
 
+    /**
+     * @brief 初始化认证管理器
+     * @param storageEngine 存储引擎指针(所有权归调用者,AuthManager不负责释放)
+     * @return 初始化是否成功
+     * @note storageEngine指针必须在AuthManager整个生命周期内有效
+     */
     bool initialize(UserStorageEngine* storageEngine);
     bool isInitialized() const;
 
@@ -55,10 +64,20 @@ signals:
     void userDeleted(const QString& username);
     void permissionChanged(const QString& username, UserPermission newPermission);
     void errorOccurred(const QString& error);
+    void sessionTimeout();
 
 private:
     bool validatePassword(const QString& password);
     bool validateUsername(const QString& username);
+    void onSessionTimeout();
+
+private:
+    struct LoginAttempt {
+        int count = 0;
+        QDateTime lastAttempt;
+        bool locked = false;
+        QDateTime lockUntil;
+    };
 
 private:
     UserStorageEngine* m_storageEngine;
@@ -66,10 +85,17 @@ private:
     bool m_initialized;
     bool m_loggedIn;
     QString m_lastError;
-    static constexpr int MIN_PASSWORD_LENGTH = 1;
+    static constexpr int MIN_PASSWORD_LENGTH = 8;
     static constexpr int MAX_PASSWORD_LENGTH = 32;
     static constexpr int MIN_USERNAME_LENGTH = 1;
     static constexpr int MAX_USERNAME_LENGTH = 20;
+    static constexpr int MAX_LOGIN_ATTEMPTS = 5;
+    static constexpr int LOCK_DURATION_MINUTES = 30;
+    static constexpr int SESSION_TIMEOUT_MINUTES = 30;
+
+    mutable QMutex m_mutex;
+    QTimer* m_sessionTimeoutTimer;
+    QHash<QString, LoginAttempt> m_loginAttempts;
 };
 
 #endif // USERAUTHMANAGER_H

@@ -49,6 +49,8 @@ private:
     QTimer* m_updateTimer = nullptr;
     QTimer* m_reconnectTimer = nullptr;
     int m_reconnectCount;
+    int m_retryCount = 0;
+    int m_successCount = 0;
     static const int MAX_RECONNECT_ATTEMPTS = 10;
 };
 

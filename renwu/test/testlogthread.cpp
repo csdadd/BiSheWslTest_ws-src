@@ -24,7 +24,7 @@ void TestLogThread::init()
     m_storageEngine = new LogStorageEngine();
     m_storageEngine->initialize(m_testDbPath);
 
-    m_logThread = new LogThread();
+    m_logThread = new LogThread(m_storageEngine);
     m_logThread->setLogFilePath(m_testLogPath);
 }
 
@@ -45,7 +45,7 @@ void TestLogThread::cleanup()
 
 void TestLogThread::testConstructor()
 {
-    LogThread thread;
+    LogThread thread(nullptr);
     QVERIFY(thread.getLogFilePath().isEmpty());
 }
 

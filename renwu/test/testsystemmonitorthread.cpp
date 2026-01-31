@@ -10,7 +10,7 @@ void TestSystemMonitorThread::cleanupTestCase()
 
 void TestSystemMonitorThread::init()
 {
-    m_thread = new SystemMonitorThread();
+    m_thread = new SystemMonitorThread(nullptr);
 }
 
 void TestSystemMonitorThread::cleanup()

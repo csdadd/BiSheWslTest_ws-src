@@ -44,7 +44,7 @@ void TestLoginDialog::testConstructor()
 void TestLoginDialog::testGetCurrentUser()
 {
     User user = m_dialog->getCurrentUser();
-    QVERIFY(user.id == 0);
+    QVERIFY(user.getId() == 0);
 }
 
 void TestLoginDialog::testOnLoginClicked()
@@ -130,7 +130,7 @@ void TestLoginDialog::testOnLoginSuccess()
             QTest::qWait(100);
 
             User user = m_dialog->getCurrentUser();
-            QVERIFY(user.username == "testuser");
+            QVERIFY(user.getUsername() == "testuser");
         }
     }
 }
@@ -150,7 +150,7 @@ void TestLoginDialog::testOnLoginFailed()
             QTest::qWait(100);
 
             User user = m_dialog->getCurrentUser();
-            QVERIFY(user.id == 0);
+            QVERIFY(user.getId() == 0);
         }
     }
 }

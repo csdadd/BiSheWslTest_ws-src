@@ -1,4 +1,5 @@
 #include "testlogstorageengine.h"
+#include "loglevel.h"
 
 void TestLogStorageEngine::initTestCase()
 {
@@ -52,7 +53,7 @@ void TestLogStorageEngine::testIsInitialized()
 
 void TestLogStorageEngine::testInsertLog()
 {
-    StorageLogEntry entry("Test message", STORAGE_LOG_INFO, QDateTime::currentDateTime(), "TestSource", "TestCategory");
+    StorageLogEntry entry("Test message", LogLevel::INFO, QDateTime::currentDateTime(), "TestSource", "TestCategory");
     QVERIFY(m_engine->insertLog(entry));
 
     QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime());
@@ -63,7 +64,7 @@ void TestLogStorageEngine::testInsertLogs()
 {
     QVector<StorageLogEntry> entries;
     for (int i = 0; i < 10; ++i) {
-        entries.append(StorageLogEntry(QString("Message %1").arg(i), STORAGE_LOG_INFO, QDateTime::currentDateTime()));
+        entries.append(StorageLogEntry(QString("Message %1").arg(i), LogLevel::INFO, QDateTime::currentDateTime()));
     }
 
     QVERIFY(m_engine->insertLogs(entries));
@@ -77,8 +78,8 @@ void TestLogStorageEngine::testQueryLogsByTimeRange()
     QDateTime now = QDateTime::currentDateTime();
     QDateTime oneHourAgo = now.addSecs(-3600);
 
-    StorageLogEntry entry1("Old message", STORAGE_LOG_INFO, oneHourAgo);
-    StorageLogEntry entry2("New message", STORAGE_LOG_INFO, now);
+    StorageLogEntry entry1("Old message", LogLevel::INFO, oneHourAgo);
+    StorageLogEntry entry2("New message", LogLevel::INFO, now);
 
     m_engine->insertLog(entry1);
     m_engine->insertLog(entry2);
@@ -89,64 +90,64 @@ void TestLogStorageEngine::testQueryLogsByTimeRange()
 
 void TestLogStorageEngine::testQueryLogsByLevel()
 {
-    StorageLogEntry entry1("Debug message", STORAGE_LOG_DEBUG, QDateTime::currentDateTime());
-    StorageLogEntry entry2("Info message", STORAGE_LOG_INFO, QDateTime::currentDateTime());
-    StorageLogEntry entry3("Error message", STORAGE_LOG_ERROR, QDateTime::currentDateTime());
+    StorageLogEntry entry1("Debug message", LogLevel::DEBUG, QDateTime::currentDateTime());
+    StorageLogEntry entry2("Info message", LogLevel::INFO, QDateTime::currentDateTime());
+    StorageLogEntry entry3("Error message", LogLevel::ERROR, QDateTime::currentDateTime());
 
     m_engine->insertLog(entry1);
     m_engine->insertLog(entry2);
     m_engine->insertLog(entry3);
 
-    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), STORAGE_LOG_ERROR);
+    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), LogLevel::ERROR);
     QVERIFY(logs.size() >= 1);
 }
 
 void TestLogStorageEngine::testQueryLogsBySource()
 {
-    StorageLogEntry entry1("Message from source1", STORAGE_LOG_INFO, QDateTime::currentDateTime(), "Source1");
-    StorageLogEntry entry2("Message from source2", STORAGE_LOG_INFO, QDateTime::currentDateTime(), "Source2");
+    StorageLogEntry entry1("Message from source1", LogLevel::INFO, QDateTime::currentDateTime(), "Source1");
+    StorageLogEntry entry2("Message from source2", LogLevel::INFO, QDateTime::currentDateTime(), "Source2");
 
     m_engine->insertLog(entry1);
     m_engine->insertLog(entry2);
 
-    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), -1, "Source1");
+    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), LogLevel::DEBUG, "Source1");
     QVERIFY(logs.size() >= 1);
 }
 
 void TestLogStorageEngine::testQueryLogsByKeyword()
 {
-    StorageLogEntry entry1("This is a test message", STORAGE_LOG_INFO, QDateTime::currentDateTime());
-    StorageLogEntry entry2("Another message", STORAGE_LOG_INFO, QDateTime::currentDateTime());
+    StorageLogEntry entry1("This is a test message", LogLevel::INFO, QDateTime::currentDateTime());
+    StorageLogEntry entry2("Another message", LogLevel::INFO, QDateTime::currentDateTime());
 
     m_engine->insertLog(entry1);
     m_engine->insertLog(entry2);
 
-    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), -1, "", "test");
+    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), LogLevel::DEBUG, "", "test");
     QVERIFY(logs.size() >= 1);
 }
 
 void TestLogStorageEngine::testQueryLogsWithMultipleFilters()
 {
-    StorageLogEntry entry1("Error from Source1", STORAGE_LOG_ERROR, QDateTime::currentDateTime(), "Source1");
-    StorageLogEntry entry2("Info from Source1", STORAGE_LOG_INFO, QDateTime::currentDateTime(), "Source1");
-    StorageLogEntry entry3("Error from Source2", STORAGE_LOG_ERROR, QDateTime::currentDateTime(), "Source2");
+    StorageLogEntry entry1("Error from Source1", LogLevel::ERROR, QDateTime::currentDateTime(), "Source1");
+    StorageLogEntry entry2("Info from Source1", LogLevel::INFO, QDateTime::currentDateTime(), "Source1");
+    StorageLogEntry entry3("Error from Source2", LogLevel::ERROR, QDateTime::currentDateTime(), "Source2");
 
     m_engine->insertLog(entry1);
     m_engine->insertLog(entry2);
     m_engine->insertLog(entry3);
 
-    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), STORAGE_LOG_ERROR, "Source1");
+    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), LogLevel::ERROR, "Source1");
     QVERIFY(logs.size() >= 1);
 }
 
 void TestLogStorageEngine::testQueryLogsWithLimit()
 {
     for (int i = 0; i < 20; ++i) {
-        StorageLogEntry entry(QString("Message %1").arg(i), STORAGE_LOG_INFO, QDateTime::currentDateTime());
+        StorageLogEntry entry(QString("Message %1").arg(i), LogLevel::INFO, QDateTime::currentDateTime());
         m_engine->insertLog(entry);
     }
 
-    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), -1, "", "", 10);
+    QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime(), LogLevel::DEBUG, "", "", 10);
     QVERIFY(logs.size() <= 10);
 }
 
@@ -155,7 +156,7 @@ void TestLogStorageEngine::testGetLogCount()
     int initialCount = m_engine->getLogCount();
 
     for (int i = 0; i < 5; ++i) {
-        StorageLogEntry entry(QString("Message %1").arg(i), STORAGE_LOG_INFO, QDateTime::currentDateTime());
+        StorageLogEntry entry(QString("Message %1").arg(i), LogLevel::INFO, QDateTime::currentDateTime());
         m_engine->insertLog(entry);
     }
 
@@ -166,7 +167,7 @@ void TestLogStorageEngine::testGetLogCount()
 void TestLogStorageEngine::testClearLogs()
 {
     for (int i = 0; i < 10; ++i) {
-        StorageLogEntry entry(QString("Message %1").arg(i), STORAGE_LOG_INFO, QDateTime::currentDateTime());
+        StorageLogEntry entry(QString("Message %1").arg(i), LogLevel::INFO, QDateTime::currentDateTime());
         m_engine->insertLog(entry);
     }
 
@@ -180,7 +181,7 @@ void TestLogStorageEngine::testClearLogs()
 void TestLogStorageEngine::testVacuum()
 {
     for (int i = 0; i < 10; ++i) {
-        StorageLogEntry entry(QString("Message %1").arg(i), STORAGE_LOG_INFO, QDateTime::currentDateTime());
+        StorageLogEntry entry(QString("Message %1").arg(i), LogLevel::INFO, QDateTime::currentDateTime());
         m_engine->insertLog(entry);
     }
 
@@ -196,7 +197,7 @@ void TestLogStorageEngine::testGetLastError()
 void TestLogStorageEngine::testSignalLogInserted()
 {
     QSignalSpy spy(m_engine, &LogStorageEngine::logInserted);
-    StorageLogEntry entry("Test message", STORAGE_LOG_INFO, QDateTime::currentDateTime());
+    StorageLogEntry entry("Test message", LogLevel::INFO, QDateTime::currentDateTime());
     m_engine->insertLog(entry);
 
     QVERIFY(spy.count() >= 1);
@@ -225,7 +226,7 @@ void TestLogStorageEngine::testThreadSafety()
 
     for (int i = 0; i < threadCount; ++i) {
         QThread* thread = QThread::create([this, i]() {
-            StorageLogEntry entry(QString("Thread message %1").arg(i), STORAGE_LOG_INFO, QDateTime::currentDateTime());
+            StorageLogEntry entry(QString("Thread message %1").arg(i), LogLevel::INFO, QDateTime::currentDateTime());
             m_engine->insertLog(entry);
             m_engine->queryLogs(QDateTime(), QDateTime());
         });

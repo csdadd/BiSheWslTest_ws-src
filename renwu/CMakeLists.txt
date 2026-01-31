@@ -52,8 +52,6 @@ set(PROJECT_SOURCES
         navstatusthread.cpp
         systemmonitorthread.h
         systemmonitorthread.cpp
-        infothread.h
-        infothread.cpp
         logthread.h
         logthread.cpp
         logtablemodel.h
@@ -104,6 +102,11 @@ set(PROJECT_SOURCES
         adduserdialog.ui
         nav2parameterthread.h
         nav2parameterthread.cpp
+        geometryutils.h
+        timeutils.h
+        logutils.h
+        coordinatetransformer.h
+        coordinatetransformer.cpp
 )
 
 add_executable(renwu
@@ -194,8 +197,6 @@ if(BUILD_TESTING)
         test/testnavstatusthread.h
         test/testsystemmonitorthread.cpp
         test/testsystemmonitorthread.h
-        test/testinfothread.cpp
-        test/testinfothread.h
         test/testmapmarker.cpp
         test/testmapmarker.h
         test/teststatusindicator.cpp
@@ -210,6 +211,8 @@ if(BUILD_TESTING)
         test/testnav2parameterthread.h
         test/testnav2parameterthreadintegration.cpp
         test/testnav2parameterthreadintegration.h
+        test/testnav2viewwidget.cpp
+        test/testnav2viewwidget.h
         mainwindow.cpp
         mainwindow.h
         mainwindow.ui
@@ -223,8 +226,6 @@ if(BUILD_TESTING)
         navstatusthread.cpp
         systemmonitorthread.h
         systemmonitorthread.cpp
-        infothread.h
-        infothread.cpp
         logthread.h
         logthread.cpp
         logtablemodel.h
@@ -275,6 +276,11 @@ if(BUILD_TESTING)
         adduserdialog.ui
         nav2parameterthread.h
         nav2parameterthread.cpp
+        geometryutils.h
+        timeutils.h
+        logutils.h
+        coordinatetransformer.h
+        coordinatetransformer.cpp
     )
 
     add_executable(renwu_tests ${TEST_SOURCES})

@@ -2,9 +2,12 @@
 #define MAPCACHE_H
 
 #include <QString>
-#include <QMap>
+#include <QHash>
 #include <QObject>
+#include <QReadWriteLock>
 #include <nav_msgs/msg/occupancy_grid.hpp>
+#include <list>
+#include <utility>
 
 class MapCache : public QObject
 {
@@ -32,8 +35,15 @@ public:
 private:
     void evictOldest();
 
-    QMap<QString, nav_msgs::msg::OccupancyGrid::SharedPtr> m_cache;
-    QMap<QString, qint64> m_timestamps;
+    // LRU缓存数据类型定义
+    using CacheItem = std::pair<QString, nav_msgs::msg::OccupancyGrid::SharedPtr>;
+    using CacheList = std::list<CacheItem>;
+    using CacheIndex = QHash<QString, CacheList::iterator>;
+
+    CacheList m_lruList;    // LRU链表：前面是最近访问，后面是最久未访问
+    CacheIndex m_index;     // 哈希索引：键 -> 链表迭代器
+
+    mutable QReadWriteLock m_lock;
     int m_maxSize;
 };
 

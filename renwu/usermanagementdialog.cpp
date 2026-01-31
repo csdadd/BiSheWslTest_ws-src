@@ -3,9 +3,16 @@
 #include "changepassworddialog.h"
 #include "adduserdialog.h"
 #include <QDebug>
+#include <QLoggingCategory>
 #include <QMessageBox>
 #include <QBrush>
 #include <QColor>
+
+Q_LOGGING_CATEGORY(userManagementDialog, "UserManagementDialog")
+
+namespace {
+    const QColor DISABLED_USER_COLOR(128, 128, 128);
+}
 
 UserManagementDialog::UserManagementDialog(UserAuthManager* authManager, QWidget* parent)
     : QDialog(parent)
@@ -13,7 +20,7 @@ UserManagementDialog::UserManagementDialog(UserAuthManager* authManager, QWidget
     , m_authManager(authManager)
 {
     ui->setupUi(this);
-    resize(700, 500);
+    resize(DIALOG_WIDTH, DIALOG_HEIGHT);
     ui->userTable->horizontalHeader()->setStretchLastSection(true);
     ui->messageLabel->hide();
     setupConnections();
@@ -22,6 +29,11 @@ UserManagementDialog::UserManagementDialog(UserAuthManager* authManager, QWidget
 
 UserManagementDialog::~UserManagementDialog()
 {
+    disconnect(m_authManager, &UserAuthManager::userCreated, this, &UserManagementDialog::onUserCreated);
+    disconnect(m_authManager, &UserAuthManager::userDeleted, this, &UserManagementDialog::onUserDeleted);
+    disconnect(m_authManager, &UserAuthManager::permissionChanged, this, &UserManagementDialog::onPermissionChanged);
+    disconnect(m_authManager, &UserAuthManager::passwordChanged, this, &UserManagementDialog::onPasswordChanged);
+    disconnect(m_authManager, &UserAuthManager::errorOccurred, this, &UserManagementDialog::onErrorOccurred);
     delete ui;
 }
 
@@ -58,16 +70,32 @@ void UserManagementDialog::addUserToTable(const User& user)
     int row = ui->userTable->rowCount();
     ui->userTable->insertRow(row);
 
-    ui->userTable->setItem(row, 0, new QTableWidgetItem(QString::number(user.id)));
-    ui->userTable->setItem(row, 1, new QTableWidgetItem(user.username));
-    ui->userTable->setItem(row, 2, new QTableWidgetItem(permissionToString(user.permission)));
-    ui->userTable->setItem(row, 3, new QTableWidgetItem(user.createdAt.toString("yyyy-MM-dd hh:mm:ss")));
-    ui->userTable->setItem(row, 4, new QTableWidgetItem(user.active ? "启用" : "禁用"));
+    ui->userTable->setItem(row, 0, new QTableWidgetItem(QString::number(user.getId())));
+    ui->userTable->setItem(row, 1, new QTableWidgetItem(user.getUsername()));
+    
+    QString permissionText;
+    switch (user.getPermission()) {
+        case UserPermission::VIEWER:
+            permissionText = "查看者";
+            break;
+        case UserPermission::OPERATOR:
+            permissionText = "操作员";
+            break;
+        case UserPermission::ADMIN:
+            permissionText = "管理员";
+            break;
+        default:
+            permissionText = "未知";
+    }
+    ui->userTable->setItem(row, 2, new QTableWidgetItem(permissionText));
+    
+    ui->userTable->setItem(row, 3, new QTableWidgetItem(user.getCreatedAt().toString("yyyy-MM-dd hh:mm:ss")));
+    ui->userTable->setItem(row, 4, new QTableWidgetItem(user.isActive() ? "启用" : "禁用"));
 
-    if (!user.active) {
+    if (!user.isActive()) {
         for (int col = 0; col < ui->userTable->columnCount(); ++col) {
             if (ui->userTable->item(row, col)) {
-                ui->userTable->item(row, col)->setForeground(QBrush(QColor(128, 128, 128)));
+                ui->userTable->item(row, col)->setForeground(QBrush(DISABLED_USER_COLOR));
             }
         }
     }
@@ -90,7 +118,13 @@ void UserManagementDialog::onDeleteUserClicked()
         return;
     }
 
-    QString username = ui->userTable->item(currentRow, 1)->text();
+    QTableWidgetItem* usernameItem = ui->userTable->item(currentRow, 1);
+    if (!usernameItem) {
+        QMessageBox::warning(this, "警告", "无法获取用户名");
+        return;
+    }
+
+    QString username = usernameItem->text();
 
     QMessageBox::StandardButton reply = QMessageBox::question(
         this,
@@ -117,7 +151,13 @@ void UserManagementDialog::onChangePasswordClicked()
         return;
     }
 
-    QString username = ui->userTable->item(currentRow, 1)->text();
+    QTableWidgetItem* usernameItem = ui->userTable->item(currentRow, 1);
+    if (!usernameItem) {
+        QMessageBox::warning(this, "警告", "无法获取用户名");
+        return;
+    }
+
+    QString username = usernameItem->text();
 
     ChangePasswordDialog dialog(ChangePasswordDialog::Mode::AdminReset, m_authManager, username, this);
     if (dialog.exec() == QDialog::Accepted) {
@@ -142,13 +182,14 @@ void UserManagementDialog::onUserCreated(const User& user)
     ui->messageLabel->setText("用户创建成功");
     ui->messageLabel->setStyleSheet("color: green; margin: 5px;");
     ui->messageLabel->show();
-    qDebug() << "[UserManagementDialog] User created:" << user.username;
+    qDebug() << "[UserManagementDialog] User created:" << user.getUsername();
 }
 
 void UserManagementDialog::onUserDeleted(const QString& username)
 {
     for (int row = 0; row < ui->userTable->rowCount(); ++row) {
-        if (ui->userTable->item(row, 1)->text() == username) {
+        QTableWidgetItem* usernameItem = ui->userTable->item(row, 1);
+        if (usernameItem && usernameItem->text() == username) {
             ui->userTable->removeRow(row);
             break;
         }
@@ -163,7 +204,21 @@ void UserManagementDialog::onPermissionChanged(const QString& username, UserPerm
 {
     for (int row = 0; row < ui->userTable->rowCount(); ++row) {
         if (ui->userTable->item(row, 1)->text() == username) {
-            ui->userTable->item(row, 2)->setText(permissionToString(newPermission));
+            QString permissionText;
+            switch (newPermission) {
+                case UserPermission::VIEWER:
+                    permissionText = "查看者";
+                    break;
+                case UserPermission::OPERATOR:
+                    permissionText = "操作员";
+                    break;
+                case UserPermission::ADMIN:
+                    permissionText = "管理员";
+                    break;
+                default:
+                    permissionText = "未知";
+            }
+            ui->userTable->item(row, 2)->setText(permissionText);
             break;
         }
     }
@@ -187,30 +242,4 @@ void UserManagementDialog::onErrorOccurred(const QString& error)
     ui->messageLabel->setStyleSheet("color: red; margin: 5px;");
     ui->messageLabel->show();
     qDebug() << "[UserManagementDialog] Error:" << error;
-}
-
-QString UserManagementDialog::permissionToString(UserPermission permission)
-{
-    switch (permission) {
-        case UserPermission::VIEWER:
-            return "查看者";
-        case UserPermission::OPERATOR:
-            return "操作员";
-        case UserPermission::ADMIN:
-            return "管理员";
-        default:
-            return "未知";
-    }
-}
-
-UserPermission UserManagementDialog::stringToPermission(const QString& str)
-{
-    if (str == "查看者") {
-        return UserPermission::VIEWER;
-    } else if (str == "操作员") {
-        return UserPermission::OPERATOR;
-    } else if (str == "管理员") {
-        return UserPermission::ADMIN;
-    }
-    return UserPermission::VIEWER;
 }

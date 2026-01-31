@@ -6,7 +6,13 @@
 #include <nav2_msgs/action/navigate_to_pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <memory>
+#include <atomic>
+#include <QMutex>
 
+/**
+ * @brief 导航动作客户端类
+ * @details 管理导航目标的发送、取消和状态跟踪，线程安全
+ */
 class NavigationActionClient : public QObject
 {
     Q_OBJECT
@@ -23,7 +29,7 @@ public:
 signals:
     void goalAccepted();
     void goalRejected(const QString& reason);
-    void feedbackReceived(double distanceRemaining, double navigationTime, int recoveries);
+    void feedbackReceived(double distanceRemaining, double navigationTime, int recoveries, double estimatedTimeRemaining);
     void resultReceived(bool success, const QString& message);
     void goalCanceled();
 
@@ -38,7 +44,9 @@ private:
     rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SharedPtr m_actionClient;
     std::shared_ptr<rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>> m_goalHandle;
     geometry_msgs::msg::PoseStamped m_currentGoal;
-    bool m_isNavigating;
+    std::atomic<bool> m_isNavigating;
+    mutable QMutex m_mutex;
+    static constexpr int CANCEL_TIMEOUT_MS = 3000;
 };
 
 #endif

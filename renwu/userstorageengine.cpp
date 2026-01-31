@@ -7,9 +7,12 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 
+// QSqlQuery对象在超出作用域时会自动关闭,无需手动调用close()
+
 UserStorageEngine::UserStorageEngine(QObject* parent)
     : QObject(parent)
     , m_initialized(false)
+    , m_connectionName(QString("user_connection_%1").arg(reinterpret_cast<quintptr>(this), 0, 16))
 {
 }
 
@@ -18,6 +21,7 @@ UserStorageEngine::~UserStorageEngine()
     if (m_database.isOpen()) {
         m_database.close();
     }
+    QSqlDatabase::removeDatabase(m_database.connectionName());
 }
 
 bool UserStorageEngine::initialize(const QString& dbPath)
@@ -25,21 +29,17 @@ bool UserStorageEngine::initialize(const QString& dbPath)
     QWriteLocker locker(&m_lock);
 
     if (m_initialized) {
-        m_lastError = "Database already initialized";
-        qDebug() << "[UserStorageEngine] Already initialized";
+        qWarning() << "[UserStorageEngine] 警告：initialize()被重复调用，数据库已经初始化";
         return true;
     }
 
     qDebug() << "[UserStorageEngine] 正在初始化数据库...";
 
     if (dbPath.isEmpty()) {
-        qDebug() << "[UserStorageEngine] 获取应用数据目录...";
         QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-        qDebug() << "[UserStorageEngine] 数据目录:" << dataDir;
 
         QDir dir(dataDir);
         if (!dir.exists()) {
-            qDebug() << "[UserStorageEngine] 创建数据目录...";
             if (!dir.mkpath(dataDir)) {
                 qWarning() << "[UserStorageEngine] 警告：无法创建目录" << dataDir;
             }
@@ -49,19 +49,18 @@ bool UserStorageEngine::initialize(const QString& dbPath)
         m_dbPath = dbPath;
     }
 
-    qDebug() << "[UserStorageEngine] 数据库路径:" << m_dbPath;
-
-    if (QSqlDatabase::contains("user_connection")) {
-        qDebug() << "[UserStorageEngine] 使用现有数据库连接...";
-        m_database = QSqlDatabase::database("user_connection");
+    if (QSqlDatabase::contains(m_connectionName)) {
+        m_database = QSqlDatabase::database(m_connectionName);
+        // 如果数据库已经存在连接,尝试关闭它以重新初始化
+        if (m_database.isOpen()) {
+            m_database.close();
+        }
     } else {
-        qDebug() << "[UserStorageEngine] 创建新的数据库连接...";
-        m_database = QSqlDatabase::addDatabase("QSQLITE", "user_connection");
+        m_database = QSqlDatabase::addDatabase("QSQLITE", m_connectionName);
     }
 
     m_database.setDatabaseName(m_dbPath);
 
-    qDebug() << "[UserStorageEngine] 正在打开数据库...";
     if (!m_database.open()) {
         m_lastError = QString("Failed to open database: %1").arg(m_database.lastError().text());
         qCritical() << "[UserStorageEngine]" << m_lastError;
@@ -69,23 +68,18 @@ bool UserStorageEngine::initialize(const QString& dbPath)
         return false;
     }
 
-    qDebug() << "[UserStorageEngine] 数据库打开成功，正在创建表...";
     if (!createTables()) {
         qCritical() << "[UserStorageEngine] 创建表失败";
         m_database.close();
         return false;
     }
 
-    qDebug() << "[UserStorageEngine] 正在创建索引...";
     if (!createIndexes()) {
         qCritical() << "[UserStorageEngine] 创建索引失败";
         m_database.close();
         return false;
     }
 
-    qDebug() << "[UserStorageEngine] 检查默认管理员账户...";
-
-    // 直接检查而不使用带锁的 userExists()
     QSqlQuery checkQuery(m_database);
     checkQuery.prepare("SELECT COUNT(*) FROM users WHERE username = ?");
     checkQuery.addBindValue("admin");
@@ -95,9 +89,6 @@ bool UserStorageEngine::initialize(const QString& dbPath)
     }
 
     if (!adminExists) {
-        qDebug() << "[UserStorageEngine] 创建默认管理员账户...";
-
-        // 直接插入数据，避免死锁
         QSqlQuery insertQuery(m_database);
         insertQuery.prepare(R"(
             INSERT INTO users (username, password_hash, permission, created_at, last_login, active)
@@ -105,26 +96,22 @@ bool UserStorageEngine::initialize(const QString& dbPath)
         )");
 
         User defaultAdmin;
-        defaultAdmin.username = "0";
-        defaultAdmin.passwordHash = hashPassword("0");
-        defaultAdmin.permission = UserPermission::ADMIN;
-        defaultAdmin.createdAt = QDateTime::currentDateTime();
-        defaultAdmin.active = true;
+        defaultAdmin.setUsername("admin");
+        defaultAdmin.setPasswordHash(hashPassword("Admin123"));
+        defaultAdmin.setPermission(UserPermission::ADMIN);
+        defaultAdmin.setCreatedAt(QDateTime::currentDateTime());
+        defaultAdmin.setActive(true);
 
-        insertQuery.addBindValue(defaultAdmin.username);
-        insertQuery.addBindValue(defaultAdmin.passwordHash);
-        insertQuery.addBindValue(static_cast<int>(defaultAdmin.permission));
-        insertQuery.addBindValue(defaultAdmin.createdAt.toMSecsSinceEpoch());
+        insertQuery.addBindValue(defaultAdmin.getUsername());
+        insertQuery.addBindValue(defaultAdmin.getPasswordHash());
+        insertQuery.addBindValue(static_cast<int>(defaultAdmin.getPermission()));
+        insertQuery.addBindValue(defaultAdmin.getCreatedAt().toMSecsSinceEpoch());
         insertQuery.addBindValue(QVariant());
-        insertQuery.addBindValue(defaultAdmin.active ? 1 : 0);
+        insertQuery.addBindValue(defaultAdmin.isActive() ? 1 : 0);
 
         if (!insertQuery.exec()) {
             qWarning() << "[UserStorageEngine] 创建默认管理员账户失败:" << insertQuery.lastError().text();
-        } else {
-            qDebug() << "[UserStorageEngine] 默认管理员账户已创建 (用户名: 0, 密码: 0)";
         }
-    } else {
-        qDebug() << "[UserStorageEngine] 默认管理员账户已存在";
     }
 
     m_initialized = true;
@@ -179,71 +166,94 @@ bool UserStorageEngine::createIndexes()
 
 bool UserStorageEngine::insertUser(const User& user)
 {
-    QWriteLocker locker(&m_lock);
+    User insertedUser;
+    bool success = false;
+    QString error;
 
-    if (!m_initialized || !m_database.isOpen()) {
-        m_lastError = "Database not initialized";
-        return false;
+    {
+        QWriteLocker locker(&m_lock);
+
+        if (!m_initialized || !m_database.isOpen()) {
+            m_lastError = "Database not initialized";
+            return false;
+        }
+
+        QSqlQuery query(m_database);
+        query.prepare(R"(
+            INSERT INTO users (username, password_hash, permission, created_at, last_login, active)
+            VALUES (?, ?, ?, ?, ?, ?)
+        )");
+
+        query.addBindValue(user.getUsername());
+        query.addBindValue(user.getPasswordHash());
+        query.addBindValue(static_cast<int>(user.getPermission()));
+        query.addBindValue(user.getCreatedAt().toMSecsSinceEpoch());
+        query.addBindValue(user.getLastLogin().isValid() ? user.getLastLogin().toMSecsSinceEpoch() : QVariant());
+        query.addBindValue(user.isActive() ? 1 : 0);
+
+        if (!query.exec()) {
+            m_lastError = QString("Failed to insert user: %1").arg(query.lastError().text());
+            emit errorOccurred(m_lastError);
+            return false;
+        }
+
+        insertedUser = user;
+        success = true;
     }
 
-    QSqlQuery query(m_database);
-    query.prepare(R"(
-        INSERT INTO users (username, password_hash, permission, created_at, last_login, active)
-        VALUES (?, ?, ?, ?, ?, ?)
-    )");
-
-    query.addBindValue(user.username);
-    query.addBindValue(user.passwordHash);
-    query.addBindValue(static_cast<int>(user.permission));
-    query.addBindValue(user.createdAt.toMSecsSinceEpoch());
-    query.addBindValue(user.lastLogin.isValid() ? user.lastLogin.toMSecsSinceEpoch() : QVariant());
-    query.addBindValue(user.active ? 1 : 0);
-
-    if (!query.exec()) {
-        m_lastError = QString("Failed to insert user: %1").arg(query.lastError().text());
-        emit errorOccurred(m_lastError);
-        return false;
+    if (success) {
+        emit userInserted(insertedUser);
     }
 
-    emit userInserted(user);
-    return true;
+    return success;
 }
 
 bool UserStorageEngine::updateUser(const User& user)
 {
-    QWriteLocker locker(&m_lock);
+    User updatedUser;
+    bool success = false;
 
-    if (!m_initialized || !m_database.isOpen()) {
-        m_lastError = "Database not initialized";
-        return false;
+    {
+        QWriteLocker locker(&m_lock);
+
+        if (!m_initialized || !m_database.isOpen()) {
+            m_lastError = "Database not initialized";
+            return false;
+        }
+
+        QSqlQuery query(m_database);
+        query.prepare(R"(
+            UPDATE users SET
+                username = ?,
+                password_hash = ?,
+                permission = ?,
+                last_login = ?,
+                active = ?
+            WHERE id = ?
+        )");
+
+        query.addBindValue(user.getUsername());
+        query.addBindValue(user.getPasswordHash());
+        query.addBindValue(static_cast<int>(user.getPermission()));
+        query.addBindValue(user.getLastLogin().isValid() ? user.getLastLogin().toMSecsSinceEpoch() : QVariant());
+        query.addBindValue(user.isActive() ? 1 : 0);
+        query.addBindValue(user.getId());
+
+        if (!query.exec()) {
+            m_lastError = QString("Failed to update user: %1").arg(query.lastError().text());
+            emit errorOccurred(m_lastError);
+            return false;
+        }
+
+        updatedUser = user;
+        success = true;
     }
 
-    QSqlQuery query(m_database);
-    query.prepare(R"(
-        UPDATE users SET
-            username = ?,
-            password_hash = ?,
-            permission = ?,
-            last_login = ?,
-            active = ?
-        WHERE id = ?
-    )");
-
-    query.addBindValue(user.username);
-    query.addBindValue(user.passwordHash);
-    query.addBindValue(static_cast<int>(user.permission));
-    query.addBindValue(user.lastLogin.isValid() ? user.lastLogin.toMSecsSinceEpoch() : QVariant());
-    query.addBindValue(user.active ? 1 : 0);
-    query.addBindValue(user.id);
-
-    if (!query.exec()) {
-        m_lastError = QString("Failed to update user: %1").arg(query.lastError().text());
-        emit errorOccurred(m_lastError);
-        return false;
+    if (success) {
+        emit userUpdated(updatedUser);
     }
 
-    emit userUpdated(user);
-    return true;
+    return success;
 }
 
 bool UserStorageEngine::deleteUser(int userId)
@@ -271,25 +281,40 @@ bool UserStorageEngine::deleteUser(int userId)
 
 bool UserStorageEngine::deleteUser(const QString& username)
 {
-    QWriteLocker locker(&m_lock);
-
     if (!m_initialized || !m_database.isOpen()) {
         m_lastError = "Database not initialized";
         return false;
     }
 
-    QSqlQuery query(m_database);
-    query.prepare("DELETE FROM users WHERE username = ?");
-    query.addBindValue(username);
-
-    if (!query.exec()) {
-        m_lastError = QString("Failed to delete user: %1").arg(query.lastError().text());
-        emit errorOccurred(m_lastError);
+    User user = getUserByUsername(username);
+    if (user.getId() == 0) {
+        m_lastError = "User not found";
         return false;
     }
 
-    emit userDeleted(query.numRowsAffected());
-    return true;
+    bool success = false;
+
+    {
+        QWriteLocker locker(&m_lock);
+
+        QSqlQuery query(m_database);
+        query.prepare("DELETE FROM users WHERE username = ?");
+        query.addBindValue(username);
+
+        if (!query.exec()) {
+            m_lastError = QString("Failed to delete user: %1").arg(query.lastError().text());
+            emit errorOccurred(m_lastError);
+            return false;
+        }
+
+        success = true;
+    }
+
+    if (success) {
+        emit userDeleted(user.getId());
+    }
+
+    return success;
 }
 
 User UserStorageEngine::getUserById(int userId)
@@ -314,15 +339,29 @@ User UserStorageEngine::getUserById(int userId)
     }
 
     if (query.next()) {
-        user.id = query.value(0).toInt();
-        user.username = query.value(1).toString();
-        user.passwordHash = query.value(2).toString();
-        user.permission = stringToPermission(query.value(3).toString());
-        user.createdAt = QDateTime::fromMSecsSinceEpoch(query.value(4).toLongLong());
-        if (!query.value(5).isNull()) {
-            user.lastLogin = QDateTime::fromMSecsSinceEpoch(query.value(5).toLongLong());
+        user.setId(query.value(0).toInt());
+        user.setUsername(query.value(1).toString());
+        user.setPasswordHash(query.value(2).toString());
+        user.setPermission(User::stringToPermission(query.value(3).toString()));
+        
+        bool timestampValid = true;
+        qint64 timestamp = query.value(4).toLongLong(&timestampValid);
+        user.setCreatedAt(QDateTime::fromMSecsSinceEpoch(timestamp));
+        if (!timestampValid || !user.getCreatedAt().isValid()) {
+            qWarning() << "[UserStorageEngine] 警告：无效的created_at时间戳:" << timestamp;
+            user.setCreatedAt(QDateTime::currentDateTime());
         }
-        user.active = query.value(6).toInt() == 1;
+        
+        if (!query.value(5).isNull()) {
+            timestampValid = true;
+            timestamp = query.value(5).toLongLong(&timestampValid);
+            user.setLastLogin(QDateTime::fromMSecsSinceEpoch(timestamp));
+            if (!timestampValid || !user.getLastLogin().isValid()) {
+                qWarning() << "[UserStorageEngine] 警告：无效的last_login时间戳:" << timestamp;
+                user.setLastLogin(QDateTime());
+            }
+        }
+        user.setActive(query.value(6).toInt() == 1);
     }
 
     return user;
@@ -350,15 +389,29 @@ User UserStorageEngine::getUserByUsername(const QString& username)
     }
 
     if (query.next()) {
-        user.id = query.value(0).toInt();
-        user.username = query.value(1).toString();
-        user.passwordHash = query.value(2).toString();
-        user.permission = stringToPermission(query.value(3).toString());
-        user.createdAt = QDateTime::fromMSecsSinceEpoch(query.value(4).toLongLong());
-        if (!query.value(5).isNull()) {
-            user.lastLogin = QDateTime::fromMSecsSinceEpoch(query.value(5).toLongLong());
+        user.setId(query.value(0).toInt());
+        user.setUsername(query.value(1).toString());
+        user.setPasswordHash(query.value(2).toString());
+        user.setPermission(User::stringToPermission(query.value(3).toString()));
+        
+        bool timestampValid = true;
+        qint64 timestamp = query.value(4).toLongLong(&timestampValid);
+        user.setCreatedAt(QDateTime::fromMSecsSinceEpoch(timestamp));
+        if (!timestampValid || !user.getCreatedAt().isValid()) {
+            qWarning() << "[UserStorageEngine] 警告：无效的created_at时间戳:" << timestamp;
+            user.setCreatedAt(QDateTime::currentDateTime());
         }
-        user.active = query.value(6).toInt() == 1;
+        
+        if (!query.value(5).isNull()) {
+            timestampValid = true;
+            timestamp = query.value(5).toLongLong(&timestampValid);
+            user.setLastLogin(QDateTime::fromMSecsSinceEpoch(timestamp));
+            if (!timestampValid || !user.getLastLogin().isValid()) {
+                qWarning() << "[UserStorageEngine] 警告：无效的last_login时间戳:" << timestamp;
+                user.setLastLogin(QDateTime());
+            }
+        }
+        user.setActive(query.value(6).toInt() == 1);
     }
 
     return user;
@@ -386,15 +439,29 @@ QVector<User> UserStorageEngine::getAllUsers()
 
     while (query.next()) {
         User user;
-        user.id = query.value(0).toInt();
-        user.username = query.value(1).toString();
-        user.passwordHash = query.value(2).toString();
-        user.permission = stringToPermission(query.value(3).toString());
-        user.createdAt = QDateTime::fromMSecsSinceEpoch(query.value(4).toLongLong());
-        if (!query.value(5).isNull()) {
-            user.lastLogin = QDateTime::fromMSecsSinceEpoch(query.value(5).toLongLong());
+        user.setId(query.value(0).toInt());
+        user.setUsername(query.value(1).toString());
+        user.setPasswordHash(query.value(2).toString());
+        user.setPermission(User::stringToPermission(query.value(3).toString()));
+
+        bool timestampValid = true;
+        qint64 timestamp = query.value(4).toLongLong(&timestampValid);
+        user.setCreatedAt(QDateTime::fromMSecsSinceEpoch(timestamp));
+        if (!timestampValid || !user.getCreatedAt().isValid()) {
+            qWarning() << "[UserStorageEngine] 警告：无效的created_at时间戳:" << timestamp;
+            user.setCreatedAt(QDateTime::currentDateTime());
         }
-        user.active = query.value(6).toInt() == 1;
+
+        if (!query.value(5).isNull()) {
+            timestampValid = true;
+            timestamp = query.value(5).toLongLong(&timestampValid);
+            user.setLastLogin(QDateTime::fromMSecsSinceEpoch(timestamp));
+            if (!timestampValid || !user.getLastLogin().isValid()) {
+                qWarning() << "[UserStorageEngine] 警告：无效的last_login时间戳:" << timestamp;
+                user.setLastLogin(QDateTime());
+            }
+        }
+        user.setActive(query.value(6).toInt() == 1);
         users.append(user);
     }
 
@@ -528,37 +595,44 @@ QString UserStorageEngine::getLastError() const
     return m_lastError;
 }
 
-QString UserStorageEngine::permissionToString(UserPermission permission)
-{
-    switch (permission) {
-        case UserPermission::VIEWER:
-            return "VIEWER";
-        case UserPermission::OPERATOR:
-            return "OPERATOR";
-        case UserPermission::ADMIN:
-            return "ADMIN";
-        default:
-            return "VIEWER";
-    }
-}
-
-UserPermission UserStorageEngine::stringToPermission(const QString& str)
-{
-    if (str == "VIEWER") {
-        return UserPermission::VIEWER;
-    } else if (str == "OPERATOR") {
-        return UserPermission::OPERATOR;
-    } else if (str == "ADMIN") {
-        return UserPermission::ADMIN;
-    }
-    return UserPermission::VIEWER;
-}
-
 QString UserStorageEngine::hashPassword(const QString& password)
 {
-    QByteArray hash = QCryptographicHash::hash(
-        password.toUtf8(),
+    QByteArray salt = QCryptographicHash::hash(
+        QByteArray::number(QDateTime::currentMSecsSinceEpoch()),
         QCryptographicHash::Sha256
     );
-    return hash.toHex();
+
+    QByteArray hash = QCryptographicHash::hash(
+        password.toUtf8() + salt,
+        QCryptographicHash::Sha256
+    );
+
+    return salt.toHex() + ":" + hash.toHex();
+}
+
+bool UserStorageEngine::verifyPassword(const QString& password, const QString& storedHash)
+{
+    QStringList parts = storedHash.split(':');
+    if (parts.size() != 2) {
+        return false;
+    }
+
+    QByteArray salt = QByteArray::fromHex(parts[0].toUtf8());
+    QByteArray expectedHash = QByteArray::fromHex(parts[1].toUtf8());
+
+    QByteArray actualHash = QCryptographicHash::hash(
+        password.toUtf8() + salt,
+        QCryptographicHash::Sha256
+    );
+
+    if (actualHash.size() != expectedHash.size()) {
+        return false;
+    }
+
+    int result = 0;
+    for (int i = 0; i < actualHash.size(); ++i) {
+        result |= actualHash[i] ^ expectedHash[i];
+    }
+
+    return result == 0;
 }

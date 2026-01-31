@@ -52,7 +52,13 @@ void ROSContextManager::shutdown()
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_initialized.load()) {
         if (rclcpp::ok()) {
-            rclcpp::shutdown();
+            try {
+                rclcpp::shutdown();
+            } catch (const std::exception& e) {
+                qWarning() << "[ROSContextManager] shutdown异常:" << e.what();
+            } catch (...) {
+                qWarning() << "[ROSContextManager] shutdown未知异常";
+            }
         }
         m_loggerNode.reset();
         m_initialized.store(false);

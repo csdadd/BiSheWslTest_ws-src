@@ -4,7 +4,7 @@
 LogQueryTask::LogQueryTask(LogStorageEngine* engine,
                          const QDateTime& startTime,
                          const QDateTime& endTime,
-                         int minLevel,
+                         LogLevel minLevel,
                          const QString& source,
                          const QString& keyword,
                          int limit,
@@ -46,7 +46,7 @@ void LogQueryTask::run()
     qDebug() << "[LogQueryTask] Starting query:"
              << "startTime:" << m_startTime
              << "endTime:" << m_endTime
-             << "minLevel:" << m_minLevel
+             << "minLevel:" << static_cast<int>(m_minLevel)
              << "source:" << m_source
              << "keyword:" << m_keyword
              << "limit:" << m_limit

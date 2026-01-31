@@ -73,6 +73,14 @@ private:
     QPropertyAnimation* m_zoomAnimation;
     QPropertyAnimation* m_scrollAnimation;
     QPixmap m_robotIcon;
+
+    // 标记项对象池
+    QVector<QGraphicsEllipseItem*> m_markerPool;
+    QVector<bool> m_markerPoolUsed;
+    static constexpr int MARKER_POOL_SIZE = 100;
+
+    QGraphicsEllipseItem* acquireMarkerItem();
+    void releaseMarkerItem(QGraphicsEllipseItem* item);
 };
 
 #endif

@@ -2,21 +2,24 @@
 #define LOGINDIALOG_H
 
 #include <QDialog>
-#include <QLineEdit>
-#include <QPushButton>
-#include <QLabel>
+#include <QFutureWatcher>
 #include "userauthmanager.h"
+#include "user.h"
 
-namespace Ui {
-class LoginDialog;
-}
+QT_BEGIN_NAMESPACE
+namespace Ui { class LoginDialog; }
+QT_END_NAMESPACE
 
+/**
+ * @brief 登录对话框类
+ * @details 支持异步登录，避免UI阻塞
+ */
 class LoginDialog : public QDialog
 {
     Q_OBJECT
 
 public:
-    explicit LoginDialog(UserAuthManager* authManager, QWidget* parent = nullptr);
+    explicit LoginDialog(UserAuthManager* authManager, QWidget *parent = nullptr);
     ~LoginDialog();
 
     User getCurrentUser() const;
@@ -26,13 +29,19 @@ private slots:
     void onCancelClicked();
     void onLoginSuccess(const User& user);
     void onLoginFailed(const QString& reason);
+    void onLoginFinished();
 
 private:
     void setupConnections();
+    void setUiEnabled(bool enabled);
 
-    Ui::LoginDialog* ui;
+private:
+    Ui::LoginDialog *ui;
     UserAuthManager* m_authManager;
     User m_currentUser;
+    QFutureWatcher<bool>* m_loginWatcher;
+    static constexpr int DIALOG_WIDTH = 400;
+    static constexpr int DIALOG_HEIGHT = 300;
 };
 
 #endif // LOGINDIALOG_H

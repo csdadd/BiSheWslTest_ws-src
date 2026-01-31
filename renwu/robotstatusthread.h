@@ -39,7 +39,6 @@ private:
     void processOdometryData(const nav_msgs::msg::Odometry::SharedPtr msg);
     void processDiagnosticsData(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg);
     void processTimeData(const sensor_msgs::msg::TimeReference::SharedPtr msg);
-    double getYawFromQuaternion(double x, double y, double z, double w);
 
 private:
     rclcpp::Node::SharedPtr m_rosNode;
@@ -52,6 +51,8 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::TimeReference>::SharedPtr m_timeRefSub;
 
     float m_batteryVoltage;
+    int m_processCount = 0;
+    bool m_firstDiagnostics = true;
     static constexpr float BATTERY_FULL = 12.6f;
     static constexpr float BATTERY_EMPTY = 10.0f;
 };

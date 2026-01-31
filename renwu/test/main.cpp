@@ -1,4 +1,5 @@
 #include <QtTest/QtTest>
+#include "testmapcache.h"  // TestMapCache first to verify LRU changes
 #include "testmapconverter.h"
 #include "testmapwidget.h"
 #include "testintegration.h"
@@ -23,20 +24,27 @@
 #include "testrobotstatusthread.h"
 #include "testnavstatusthread.h"
 #include "testsystemmonitorthread.h"
-#include "testinfothread.h"
 #include "testmapmarker.h"
 #include "teststatusindicator.h"
-#include "testmapcache.h"
 #include "testmapthread.h"
 #include "testmainwindow.h"
 #include "testnav2parameterthread.h"
 #include "testnav2parameterthreadintegration.h"
+
+// TestNav2ViewWidget last (has crashing test)
+#include "testnav2viewwidget.h"
 
 int main(int argc, char** argv)
 {
     QApplication app(argc, argv);
 
     int result = 0;
+
+    // Run TestMapCache first to verify LRU changes
+    {
+        TestMapCache testMapCache;
+        result |= QTest::qExec(&testMapCache, argc, argv);
+    }
 
     {
         TestMapConverter testMapConverter;
@@ -159,11 +167,6 @@ int main(int argc, char** argv)
     }
 
     {
-        TestInfoThread testInfoThread;
-        result |= QTest::qExec(&testInfoThread, argc, argv);
-    }
-
-    {
         TestMapMarker testMapMarker;
         result |= QTest::qExec(&testMapMarker, argc, argv);
     }
@@ -196,6 +199,12 @@ int main(int argc, char** argv)
     {
         TestNav2ParameterThreadIntegration testNav2ParameterThreadIntegration;
         result |= QTest::qExec(&testNav2ParameterThreadIntegration, argc, argv);
+    }
+
+    // TestNav2ViewWidget last - may have crashing tests
+    {
+        TestNav2ViewWidget testNav2ViewWidget;
+        result |= QTest::qExec(&testNav2ViewWidget, argc, argv);
     }
 
     return result;

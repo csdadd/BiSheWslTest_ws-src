@@ -56,8 +56,8 @@ void TestUserStorageEngine::testInsertUser()
     QVERIFY(m_engine->insertUser(user));
 
     User retrieved = m_engine->getUserById(1);
-    QVERIFY(retrieved.id == 1);
-    QVERIFY(retrieved.username == "testuser");
+    QVERIFY(retrieved.getId() == 1);
+    QVERIFY(retrieved.getUsername() == "testuser");
 }
 
 void TestUserStorageEngine::testInsertDuplicateUser()
@@ -75,10 +75,10 @@ void TestUserStorageEngine::testGetUserById()
     m_engine->insertUser(user);
 
     User retrieved = m_engine->getUserById(1);
-    QVERIFY(retrieved.id == 1);
-    QVERIFY(retrieved.username == "testuser");
-    QVERIFY(retrieved.passwordHash == "hash123");
-    QVERIFY(retrieved.permission == UserPermission::ADMIN);
+    QVERIFY(retrieved.getId() == 1);
+    QVERIFY(retrieved.getUsername() == "testuser");
+    QVERIFY(retrieved.getPasswordHash() == "hash123");
+    QVERIFY(retrieved.getPermission() == UserPermission::ADMIN);
 }
 
 void TestUserStorageEngine::testGetUserByUsername()
@@ -87,20 +87,20 @@ void TestUserStorageEngine::testGetUserByUsername()
     m_engine->insertUser(user);
 
     User retrieved = m_engine->getUserByUsername("testuser");
-    QVERIFY(retrieved.id == 1);
-    QVERIFY(retrieved.username == "testuser");
+    QVERIFY(retrieved.getId() == 1);
+    QVERIFY(retrieved.getUsername() == "testuser");
 }
 
 void TestUserStorageEngine::testGetUserByIdNotFound()
 {
     User retrieved = m_engine->getUserById(999);
-    QVERIFY(retrieved.id == 0);
+    QVERIFY(retrieved.getId() == 0);
 }
 
 void TestUserStorageEngine::testGetUserByUsernameNotFound()
 {
     User retrieved = m_engine->getUserByUsername("nonexistent");
-    QVERIFY(retrieved.id == 0);
+    QVERIFY(retrieved.getId() == 0);
 }
 
 void TestUserStorageEngine::testUpdateUser()
@@ -108,13 +108,13 @@ void TestUserStorageEngine::testUpdateUser()
     User user(1, "testuser", "hash123", UserPermission::ADMIN);
     m_engine->insertUser(user);
 
-    user.permission = UserPermission::OPERATOR;
-    user.active = false;
+    user.setPermission(UserPermission::OPERATOR);
+    user.setActive(false);
     QVERIFY(m_engine->updateUser(user));
 
     User retrieved = m_engine->getUserById(1);
-    QVERIFY(retrieved.permission == UserPermission::OPERATOR);
-    QVERIFY(retrieved.active == false);
+    QVERIFY(retrieved.getPermission() == UserPermission::OPERATOR);
+    QVERIFY(retrieved.isActive() == false);
 }
 
 void TestUserStorageEngine::testDeleteUserById()
@@ -124,7 +124,7 @@ void TestUserStorageEngine::testDeleteUserById()
 
     QVERIFY(m_engine->deleteUser(1));
     User retrieved = m_engine->getUserById(1);
-    QVERIFY(retrieved.id == 0);
+    QVERIFY(retrieved.getId() == 0);
 }
 
 void TestUserStorageEngine::testDeleteUserByUsername()
@@ -134,7 +134,7 @@ void TestUserStorageEngine::testDeleteUserByUsername()
 
     QVERIFY(m_engine->deleteUser("testuser"));
     User retrieved = m_engine->getUserByUsername("testuser");
-    QVERIFY(retrieved.id == 0);
+    QVERIFY(retrieved.getId() == 0);
 }
 
 void TestUserStorageEngine::testUpdateLastLogin()
@@ -144,7 +144,7 @@ void TestUserStorageEngine::testUpdateLastLogin()
 
     QVERIFY(m_engine->updateLastLogin(1));
     User retrieved = m_engine->getUserById(1);
-    QVERIFY(retrieved.lastLogin.isValid());
+    QVERIFY(retrieved.getLastLogin().isValid());
 }
 
 void TestUserStorageEngine::testChangePasswordById()
@@ -154,7 +154,7 @@ void TestUserStorageEngine::testChangePasswordById()
 
     QVERIFY(m_engine->changePassword(1, "newHash"));
     User retrieved = m_engine->getUserById(1);
-    QVERIFY(retrieved.passwordHash == "newHash");
+    QVERIFY(retrieved.getPasswordHash() == "newHash");
 }
 
 void TestUserStorageEngine::testChangePasswordByUsername()
@@ -164,7 +164,7 @@ void TestUserStorageEngine::testChangePasswordByUsername()
 
     QVERIFY(m_engine->changePassword("testuser", "newHash"));
     User retrieved = m_engine->getUserByUsername("testuser");
-    QVERIFY(retrieved.passwordHash == "newHash");
+    QVERIFY(retrieved.getPasswordHash() == "newHash");
 }
 
 void TestUserStorageEngine::testUserExists()
@@ -183,12 +183,12 @@ void TestUserStorageEngine::testUserExistsNotFound()
 void TestUserStorageEngine::testIsUserActive()
 {
     User user(1, "testuser", "hash123", UserPermission::ADMIN);
-    user.active = true;
+    user.setActive(true);
     m_engine->insertUser(user);
 
     QVERIFY(m_engine->isUserActive("testuser"));
 
-    user.active = false;
+    user.setActive(false);
     m_engine->updateUser(user);
     QVERIFY(!m_engine->isUserActive("testuser"));
 }
@@ -238,7 +238,7 @@ void TestUserStorageEngine::testSignalUserUpdated()
     m_engine->insertUser(user);
 
     QSignalSpy spy(m_engine, &UserStorageEngine::userUpdated);
-    user.permission = UserPermission::OPERATOR;
+    user.setPermission(UserPermission::OPERATOR);
     m_engine->updateUser(user);
 
     QVERIFY(spy.count() == 1);

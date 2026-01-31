@@ -15,7 +15,7 @@ void TestLogFilterProxyModel::init()
     m_proxyModel->setSourceModel(m_sourceModel);
 
     for (int i = 0; i < 20; ++i) {
-        int level = i % 5;
+        LogLevel level = static_cast<LogLevel>(i % 5);
         QString source = QString("Source%1").arg(i % 3);
         LogEntry entry(QString("Message %1").arg(i), level, QDateTime::currentDateTime(), source);
         m_sourceModel->addLogEntry(entry);
@@ -41,8 +41,8 @@ void TestLogFilterProxyModel::testConstructor()
 void TestLogFilterProxyModel::testSetLogLevelFilter()
 {
     QSet<int> levels;
-    levels.insert(LOG_INFO);
-    levels.insert(LOG_ERROR);
+    levels.insert(static_cast<int>(LogLevel::INFO));
+    levels.insert(static_cast<int>(LogLevel::ERROR));
 
     m_proxyModel->setLogLevelFilter(levels);
 
@@ -52,12 +52,12 @@ void TestLogFilterProxyModel::testSetLogLevelFilter()
 void TestLogFilterProxyModel::testLogLevelFilter()
 {
     QSet<int> levels;
-    levels.insert(LOG_INFO);
+    levels.insert(static_cast<int>(LogLevel::INFO));
 
     m_proxyModel->setLogLevelFilter(levels);
 
     QVERIFY(m_proxyModel->logLevelFilter().size() == 1);
-    QVERIFY(m_proxyModel->logLevelFilter().contains(LOG_INFO));
+    QVERIFY(m_proxyModel->logLevelFilter().contains(static_cast<int>(LogLevel::INFO)));
 }
 
 void TestLogFilterProxyModel::testSetKeywordFilter()
@@ -166,7 +166,7 @@ void TestLogFilterProxyModel::testUseRegExp()
 void TestLogFilterProxyModel::testClearAllFilters()
 {
     QSet<int> levels;
-    levels.insert(LOG_INFO);
+    levels.insert(static_cast<int>(LogLevel::INFO));
     m_proxyModel->setLogLevelFilter(levels);
     m_proxyModel->setKeywordFilter("test");
     m_proxyModel->setSourceFilter("Source1");
@@ -183,7 +183,7 @@ void TestLogFilterProxyModel::testClearAllFilters()
 void TestLogFilterProxyModel::testFilterAcceptsRow()
 {
     QSet<int> levels;
-    levels.insert(LOG_INFO);
+    levels.insert(static_cast<int>(LogLevel::INFO));
     m_proxyModel->setLogLevelFilter(levels);
 
     m_proxyModel->invalidate();
@@ -197,8 +197,8 @@ void TestLogFilterProxyModel::testFilterAcceptsRow()
 void TestLogFilterProxyModel::testMultipleFilters()
 {
     QSet<int> levels;
-    levels.insert(LOG_INFO);
-    levels.insert(LOG_ERROR);
+    levels.insert(static_cast<int>(LogLevel::INFO));
+    levels.insert(static_cast<int>(LogLevel::ERROR));
 
     m_proxyModel->setLogLevelFilter(levels);
     m_proxyModel->setSourceFilter("Source1");

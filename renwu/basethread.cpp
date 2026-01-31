@@ -14,13 +14,25 @@ BaseThread::BaseThread(QObject* parent)
 BaseThread::~BaseThread()
 {
     stopThread();
-    wait();
+
+    // 等待spin线程结束
+    if (m_spinThread && m_spinThread->joinable()) {
+        m_spinThread->join();
+    }
+
+    // 使用超时等待，避免永久阻塞
+    if (!wait(WAIT_TIMEOUT_MS)) {
+        qWarning() << "[BaseThread] 析构函数 - 等待线程结束超时，强制终止:" << m_threadName;
+        terminate();
+        wait();
+    }
 }
 
 void BaseThread::stopThread()
 {
-    m_stopped = true;
+    // 先设置m_running为false，再设置m_stopped为true，避免竞态条件
     m_running = false;
+    m_stopped = true;
 }
 
 bool BaseThread::isThreadRunning() const
@@ -39,18 +51,29 @@ void BaseThread::run()
     try {
         initialize();
 
-        std::thread spinThread([this]() {
+        // 使用unique_ptr管理线程生命周期
+        m_spinThread = std::make_unique<std::thread>([this]() {
             while (rclcpp::ok() && !m_stopped) {
                 if (m_executor) {
-                    m_executor->spin();
+                    // 使用spin_once替代spin，避免阻塞
+                    m_executor->spin_once(std::chrono::milliseconds(SPIN_TIMEOUT_MS));
+                } else {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
             }
         });
-        spinThread.detach();
 
         while (!m_stopped && !isInterruptionRequested()) {
             process();
             msleep(10);
+        }
+
+        // 先停止spin线程
+        m_stopped = true;
+
+        // 等待spin线程结束
+        if (m_spinThread && m_spinThread->joinable()) {
+            m_spinThread->join();
         }
 
         cleanup();

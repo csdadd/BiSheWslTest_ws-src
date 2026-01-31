@@ -1,4 +1,5 @@
 #include "logtablemodel.h"
+#include "logutils.h"
 #include <QColor>
 #include <QDebug>
 
@@ -6,11 +7,19 @@ LogTableModel::LogTableModel(QObject* parent)
     : QAbstractTableModel(parent)
     , m_maxLogs(1000)
     , m_storageEngine(nullptr)
+    , m_batchUpdateTimer(new QTimer(this))
+    , m_batchUpdateEnabled(false)
+    , m_batchUpdateInterval(200)
 {
+    connect(m_batchUpdateTimer, &QTimer::timeout, this, &LogTableModel::onBatchUpdateTimer);
 }
 
 LogTableModel::~LogTableModel()
 {
+    if (m_batchUpdateTimer->isActive()) {
+        m_batchUpdateTimer->stop();
+    }
+    flushPendingLogs();
 }
 
 int LogTableModel::rowCount(const QModelIndex& parent) const
@@ -42,7 +51,7 @@ QVariant LogTableModel::data(const QModelIndex& index, int role) const
         case 0:
             return entry.timestamp.toString("yyyy-MM-dd hh:mm:ss.zzz");
         case 1:
-            return levelToString(entry.level);
+            return LogUtils::levelToString(entry.level);
         case 2:
             return entry.source;
         case 3:
@@ -62,15 +71,15 @@ QVariant LogTableModel::data(const QModelIndex& index, int role) const
     if (role == Qt::ForegroundRole) {
         const LogEntry& entry = m_logs[index.row()];
         switch (entry.level) {
-        case LOG_DEBUG:
+        case LogLevel::DEBUG:
             return QColor(128, 128, 128);
-        case LOG_INFO:
+        case LogLevel::INFO:
             return QColor(0, 0, 0);
-        case LOG_WARNING:
+        case LogLevel::WARNING:
             return QColor(255, 165, 0);
-        case LOG_ERROR:
+        case LogLevel::ERROR:
             return QColor(255, 0, 0);
-        case LOG_FATAL:
+        case LogLevel::FATAL:
             return QColor(139, 0, 0);
         default:
             return QColor(0, 0, 0);
@@ -102,11 +111,12 @@ QVariant LogTableModel::headerData(int section, Qt::Orientation orientation, int
 
 void LogTableModel::addLogEntry(const LogEntry& entry)
 {
-    beginInsertRows(QModelIndex(), m_logs.size(), m_logs.size());
-    m_logs.append(entry);
-    endInsertRows();
+    m_pendingLogs.append(entry);
 
-    enforceMaxLogs();
+    // 如果批量更新未启用或待处理日志超过阈值，立即刷新
+    if (!m_batchUpdateEnabled || m_pendingLogs.size() >= BATCH_THRESHOLD) {
+        flushPendingLogs();
+    }
 }
 
 void LogTableModel::addLogEntries(const QVector<LogEntry>& entries)
@@ -162,24 +172,6 @@ void LogTableModel::enforceMaxLogs()
     }
 }
 
-QString LogTableModel::levelToString(int level) const
-{
-    switch (level) {
-    case LOG_DEBUG:
-        return "DEBUG";
-    case LOG_INFO:
-        return "INFO";
-    case LOG_WARNING:
-        return "WARN";
-    case LOG_ERROR:
-        return "ERROR";
-    case LOG_FATAL:
-        return "FATAL";
-    default:
-        return "UNKNOWN";
-    }
-}
-
 void LogTableModel::setStorageEngine(LogStorageEngine* engine)
 {
     m_storageEngine = engine;
@@ -198,7 +190,7 @@ LogEntry LogTableModel::convertStorageEntry(const StorageLogEntry& storageEntry)
 
 void LogTableModel::loadFromDatabase(const QDateTime& startTime,
                                       const QDateTime& endTime,
-                                      int minLevel,
+                                      LogLevel minLevel,
                                       const QString& source,
                                       const QString& keyword,
                                       int limit)
@@ -228,7 +220,7 @@ void LogTableModel::loadFromDatabase(const QDateTime& startTime,
 
 void LogTableModel::appendFromDatabase(const QDateTime& startTime,
                                        const QDateTime& endTime,
-                                       int minLevel,
+                                       LogLevel minLevel,
                                        const QString& source,
                                        const QString& keyword,
                                        int limit)
@@ -259,4 +251,38 @@ void LogTableModel::appendFromDatabase(const QDateTime& startTime,
     enforceMaxLogs();
 
     qDebug() << "[LogTableModel] Appended" << entries.size() << "logs from database";
+}
+
+void LogTableModel::setBatchUpdateEnabled(bool enabled)
+{
+    m_batchUpdateEnabled = enabled;
+    if (enabled) {
+        m_batchUpdateTimer->start(m_batchUpdateInterval);
+    } else {
+        m_batchUpdateTimer->stop();
+        flushPendingLogs();
+    }
+}
+
+void LogTableModel::setBatchUpdateInterval(int ms)
+{
+    m_batchUpdateInterval = ms;
+    if (m_batchUpdateTimer->isActive()) {
+        m_batchUpdateTimer->setInterval(m_batchUpdateInterval);
+    }
+}
+
+void LogTableModel::flushPendingLogs()
+{
+    if (m_pendingLogs.isEmpty()) {
+        return;
+    }
+
+    addLogEntries(m_pendingLogs);
+    m_pendingLogs.clear();
+}
+
+void LogTableModel::onBatchUpdateTimer()
+{
+    flushPendingLogs();
 }

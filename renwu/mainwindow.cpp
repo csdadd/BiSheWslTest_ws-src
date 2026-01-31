@@ -5,7 +5,9 @@
 #include <QDateTime>
 #include <QFileDialog>
 #include <QTimer>
+#include <QCoreApplication>
 #include <algorithm>
+#include <QStandardPaths>
 #include "maploader.h"
 #include "mapconverter.h"
 #include "mapmarker.h"
@@ -15,83 +17,41 @@
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
-    , m_robotStatusThread(nullptr)
-    , m_navStatusThread(nullptr)
-    , m_systemMonitorThread(nullptr)
-    , m_logThread(nullptr)
-    , m_logTableModel(nullptr)
-    , m_logFilterProxyModel(nullptr)
-    , m_mapThread(nullptr)
-    , m_nav2ViewWidget(nullptr)
-    // , m_mapWidget(nullptr)  // 保留备份
-    , m_mapCache(nullptr)
-    , m_navigationClient(nullptr)
-    , m_pathVisualizer(nullptr)
     , m_targetX(0.0)
     , m_targetY(0.0)
     , m_targetYaw(0.0)
     , m_hasTarget(false)
     , m_startTime(QDateTime::currentDateTime())
-    , m_userStorageEngine(nullptr)
-    , m_userAuthManager(nullptr)
-    , m_loginDialog(nullptr)
-    , m_userManagementDialog(nullptr)
-    , m_paramThread(nullptr)
+    , m_initialDistance(0.0)
 {
     ui->setupUi(this);
+}
 
-    qDebug() << "[MainWindow] 正在初始化用户存储引擎...";
-    m_userStorageEngine = new UserStorageEngine(this);
+bool MainWindow::initialize()
+{
+    // 使用智能指针管理资源，自动释放
+    m_userStorageEngine = std::make_unique<UserStorageEngine>(this);
     if (!m_userStorageEngine->initialize()) {
         qCritical() << "[MainWindow] 错误：用户存储引擎初始化失败！";
         QMessageBox::critical(this, "错误", "用户存储引擎初始化失败！\n\n程序无法继续运行。");
-        exit(1);
+        return false;
     }
 
-    qDebug() << "[MainWindow] 用户存储引擎初始化成功";
-
-    qDebug() << "[MainWindow] 正在初始化用户认证管理器...";
-    m_userAuthManager = new UserAuthManager(this);
-    if (!m_userAuthManager->initialize(m_userStorageEngine)) {
+    m_userAuthManager = std::make_unique<UserAuthManager>(this);
+    if (!m_userAuthManager->initialize(m_userStorageEngine.get())) {
         qCritical() << "[MainWindow] 错误：用户认证管理器初始化失败！";
         QMessageBox::critical(this, "错误", "用户认证管理器初始化失败！\n\n程序无法继续运行。");
-        exit(1);
+        return false;
     }
 
-    qDebug() << "[MainWindow] 用户认证管理器初始化成功";
+    m_loginDialog = std::make_unique<LoginDialog>(m_userAuthManager.get(), this);
 
-    qDebug() << "[MainWindow] 正在创建登录对话框...";
-    m_loginDialog = new LoginDialog(m_userAuthManager, this);
-    if (!m_loginDialog) {
-        qCritical() << "[MainWindow] 错误：登录对话框创建失败！";
-        QMessageBox::critical(this, "错误", "登录对话框创建失败！\n\n程序无法继续运行。");
-        exit(1);
-    }
-
-    qDebug() << "[MainWindow] 登录对话框创建成功，正在显示登录界面...";
-    int dialogResult = m_loginDialog->exec();
-
-    if (dialogResult != QDialog::Accepted) {
-        qWarning() << "[MainWindow] 警告：登录对话框被用户取消或关闭";
-        if (!m_userAuthManager->isLoggedIn()) {
-            qCritical() << "[MainWindow] 错误：用户未登录，程序将退出";
-            QMessageBox::critical(this, "错误", "登录失败，程序将退出");
-            exit(1);
-        }
-    }
-
-    if (!m_userAuthManager->isLoggedIn()) {
-        qCritical() << "[MainWindow] 错误：登录验证失败，程序将退出";
-        QMessageBox::critical(this, "错误", "登录失败，程序将退出");
-        exit(1);
-    }
-
-    qDebug() << "[MainWindow] 用户登录成功:" << m_userAuthManager->getCurrentUsername();
-
-    m_logTableModel = new LogTableModel(this);
-    m_logFilterProxyModel = new LogFilterProxyModel(this);
-    m_logFilterProxyModel->setSourceModel(m_logTableModel);
-    ui->logTableView->setModel(m_logFilterProxyModel);
+    m_logTableModel = std::make_unique<LogTableModel>(this);
+    m_logTableModel->setBatchUpdateEnabled(true);
+    m_logTableModel->setBatchUpdateInterval(200);
+    m_logFilterProxyModel = std::make_unique<LogFilterProxyModel>(this);
+    m_logFilterProxyModel->setSourceModel(m_logTableModel.get());
+    ui->logTableView->setModel(m_logFilterProxyModel.get());
 
     ui->logTableView->setColumnWidth(0, 180);
     ui->logTableView->setColumnWidth(1, 80);
@@ -101,19 +61,24 @@ MainWindow::MainWindow(QWidget *parent)
     // 初始化 ROS2 上下文
     ROSContextManager::instance().initialize();
 
-    // 创建 Nav2ViewWidget
-    std::string map_path = "/home/w/wheeltec_ros2/src/renwu/map/WHEELTEC.yaml";
+    // 创建 Nav2ViewWidget，从ROS参数获取地图路径
     auto node = std::make_shared<rclcpp::Node>("nav2_view_node");
-    m_nav2ViewWidget = new Nav2ViewWidget(map_path, node, this);
-    ui->nav2MapLayout->addWidget(m_nav2ViewWidget);
+    std::string map_path = getMapPathFromRosParam(node).toStdString();
+    m_nav2ViewWidget = std::make_unique<Nav2ViewWidget>(map_path, node, this);
 
-    // m_mapWidget = new MapWidget(this);
-    // ui->mapLayout->addWidget(m_mapWidget);  // 保留备份
+    // 连接地图加载信号，处理加载失败情况
+    connect(m_nav2ViewWidget.get(), &Nav2ViewWidget::mapLoadFailed,
+            this, [this](const QString& error) {
+                qWarning() << "[MainWindow]" << error;
+                // 地图加载失败时显示警告但不阻塞程序
+                // 用户可以通过界面功能选择其他地图
+            });
 
-    m_mapCache = new MapCache(10, this);
+    ui->nav2MapLayout->addWidget(m_nav2ViewWidget.get());
 
-    m_navigationClient = new NavigationActionClient(this);
-    // m_pathVisualizer = new PathVisualizer(m_mapWidget->scene(), this);  // 保留备份
+    m_mapCache = std::make_unique<MapCache>(10, this);
+
+    m_navigationClient = std::make_unique<NavigationActionClient>(this);
     m_pathVisualizer = nullptr;  // Nav2ViewWidget 内部处理路径显示
 
     QTimer* currentTimeTimer = new QTimer(this);
@@ -124,35 +89,44 @@ MainWindow::MainWindow(QWidget *parent)
     connectSignals();
     startAllThreads();
 
-    updateUIBasedOnPermission();
+    // 尝试从环境变量自动登录（仅用于测试）
+    QString auto_username = qgetenv("WHEELTEC_USERNAME");
+    QString auto_password = qgetenv("WHEELTEC_PASSWORD");
+    if (!auto_username.isEmpty() && !auto_password.isEmpty()) {
+        qDebug() << "[MainWindow] 尝试自动登录...";
+        if (m_userAuthManager->login(auto_username, auto_password)) {
+            qDebug() << "[MainWindow] 自动登录成功:" << m_userAuthManager->getCurrentUsername();
+        } else {
+            qWarning() << "[MainWindow] 自动登录失败:" << m_userAuthManager->getLastError();
+            // 自动登录失败不阻塞，让用户手动登录
+        }
+    }
+
+    return true;
 }
 
 MainWindow::~MainWindow()
 {
     stopAllThreads();
 
-    delete m_robotStatusThread;
-    delete m_navStatusThread;
-    delete m_systemMonitorThread;
-    delete m_logThread;
-    delete m_mapThread;
-    delete m_paramThread;
-    delete m_nav2ViewWidget;
-    // delete m_mapWidget;  // 保留备份
-    delete m_mapCache;
-    delete m_navigationClient;
-    // delete m_pathVisualizer;  // 现在为 nullptr
+    // 智能指针自动管理资源，无需手动delete
     delete ui;
 }
 
 void MainWindow::initializeThreads()
 {
-    m_robotStatusThread = new RobotStatusThread(this);
-    m_navStatusThread = new NavStatusThread(this);
-    m_systemMonitorThread = new SystemMonitorThread(this);
-    m_logThread = new LogThread(this);
-    m_mapThread = new MapThread(this);
-    m_paramThread = new Nav2ParameterThread(this);
+    // 创建统一的日志存储引擎
+    m_logStorage = std::make_unique<LogStorageEngine>();
+    QString dbPath = QCoreApplication::applicationDirPath() + "/logs/unified_logs.db";
+    if (!m_logStorage->initialize(dbPath)) {
+        qWarning() << "[MainWindow] Failed to initialize LogStorageEngine:" << m_logStorage->getLastError();
+    }
+
+    m_robotStatusThread = std::make_unique<RobotStatusThread>(this);
+    m_navStatusThread = std::make_unique<NavStatusThread>(this);
+    m_systemMonitorThread = std::make_unique<SystemMonitorThread>(m_logStorage.get(), this);
+    m_logThread = std::make_unique<LogThread>(m_logStorage.get(), this);
+    m_paramThread = std::make_unique<Nav2ParameterThread>(this);
 
     m_logTableModel->setStorageEngine(m_logThread->getStorageEngine());
 }
@@ -160,118 +134,93 @@ void MainWindow::initializeThreads()
 void MainWindow::connectSignals()
 {
     // RobotStatusThread信号连接
-    connect(m_robotStatusThread, &RobotStatusThread::batteryStatusReceived,
+    connect(m_robotStatusThread.get(), &RobotStatusThread::batteryStatusReceived,
             this, &MainWindow::onBatteryStatusReceived);
-    connect(m_robotStatusThread, &RobotStatusThread::positionReceived,
+    connect(m_robotStatusThread.get(), &RobotStatusThread::positionReceived,
             this, &MainWindow::onPositionReceived);
-    connect(m_robotStatusThread, &RobotStatusThread::odometryReceived,
+    connect(m_robotStatusThread.get(), &RobotStatusThread::odometryReceived,
             this, &MainWindow::onOdometryReceived);
-    connect(m_robotStatusThread, &RobotStatusThread::systemTimeReceived,
+    connect(m_robotStatusThread.get(), &RobotStatusThread::systemTimeReceived,
             this, &MainWindow::onSystemTimeReceived);
-    connect(m_robotStatusThread, &RobotStatusThread::diagnosticsReceived,
+    connect(m_robotStatusThread.get(), &RobotStatusThread::diagnosticsReceived,
             this, &MainWindow::onDiagnosticsReceived);
-    connect(m_robotStatusThread, &RobotStatusThread::connectionStateChanged,
+    connect(m_robotStatusThread.get(), &RobotStatusThread::connectionStateChanged,
             this, &MainWindow::onConnectionStateChanged);
 
     // RobotStatusThread日志转发给LogThread
-    connect(m_robotStatusThread, &RobotStatusThread::logMessage,
-            m_logThread, &LogThread::writeLog);
+    connect(m_robotStatusThread.get(), &RobotStatusThread::logMessage,
+            m_logThread.get(), &LogThread::writeLog);
 
     // NavStatusThread信号连接
-    connect(m_navStatusThread, &NavStatusThread::navigationStatusReceived,
+    connect(m_navStatusThread.get(), &NavStatusThread::navigationStatusReceived,
             this, &MainWindow::onNavigationStatusReceived);
-    connect(m_navStatusThread, &NavStatusThread::navigationPathReceived,
+    connect(m_navStatusThread.get(), &NavStatusThread::navigationPathReceived,
             this, &MainWindow::onNavigationPathReceived);
-    connect(m_navStatusThread, &NavStatusThread::connectionStateChanged,
+    connect(m_navStatusThread.get(), &NavStatusThread::connectionStateChanged,
             this, &MainWindow::onConnectionStateChanged);
 
     // NavStatusThread日志转发给LogThread
-    connect(m_navStatusThread, &NavStatusThread::logMessage,
-            m_logThread, &LogThread::writeLog);
+    connect(m_navStatusThread.get(), &NavStatusThread::logMessage,
+            m_logThread.get(), &LogThread::writeLog);
 
     // SystemMonitorThread信号连接
-    connect(m_systemMonitorThread, &SystemMonitorThread::logMessageReceived,
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::logMessageReceived,
             this, &MainWindow::onLogMessageReceived);
-    connect(m_systemMonitorThread, &SystemMonitorThread::collisionDetected,
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::collisionDetected,
             this, &MainWindow::onCollisionDetected);
-    connect(m_systemMonitorThread, &SystemMonitorThread::anomalyDetected,
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::anomalyDetected,
             this, &MainWindow::onAnomalyDetected);
-    connect(m_systemMonitorThread, &SystemMonitorThread::behaviorTreeLogReceived,
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::behaviorTreeLogReceived,
             this, &MainWindow::onBehaviorTreeLogReceived);
-    connect(m_systemMonitorThread, &SystemMonitorThread::connectionStateChanged,
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::connectionStateChanged,
             this, &MainWindow::onConnectionStateChanged);
 
     // SystemMonitorThread日志转发给LogThread
-    connect(m_systemMonitorThread, &SystemMonitorThread::logMessage,
-            m_logThread, &LogThread::writeLog);
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::logMessage,
+            m_logThread.get(), &LogThread::writeLog);
 
     // SystemMonitorThread日志接收后转发给LogThread
-    connect(m_systemMonitorThread, &SystemMonitorThread::logMessageReceived,
-            m_logThread, [this](const QString& message, int level, const QDateTime& timestamp) {
-        LogEntry entry(message, level, timestamp, "SystemMonitor", "ROS");
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::logMessageReceived,
+            m_logThread.get(), [this](const QString& message, int level, const QDateTime& timestamp) {
+        LogEntry entry(message, static_cast<LogLevel>(level), timestamp, "SystemMonitor", "ROS");
         m_logThread->writeLogEntry(entry);
     });
 
     // RobotStatusThread的诊断信息转发给SystemMonitorThread
-    connect(m_robotStatusThread, &RobotStatusThread::diagnosticsReceived,
-            m_systemMonitorThread, &SystemMonitorThread::onDiagnosticsReceived);
+    connect(m_robotStatusThread.get(), &RobotStatusThread::diagnosticsReceived,
+            m_systemMonitorThread.get(), &SystemMonitorThread::onDiagnosticsReceived);
 
     // LogThread信号连接
-    connect(m_logThread, &LogThread::logFileChanged,
+    connect(m_logThread.get(), &LogThread::logFileChanged,
             this, &MainWindow::onLogFileChanged);
 
-    // MapThread信号连接
-    connect(m_mapThread, &MapThread::mapReceived,
-            this, &MainWindow::onMapReceived);
-    connect(m_mapThread, &MapThread::connectionStateChanged,
-            this, &MainWindow::onMapConnectionStateChanged);
-
-    // RobotStatusThread -> MapWidget (保留备份)
-    // connect(m_robotStatusThread, &RobotStatusThread::positionReceived,
-    //         this, [this](double x, double y, double yaw) {
-    //             if (m_mapWidget) {
-    //                 m_mapWidget->updateRobotPose(x, y, yaw);
-    //             }
-    //         });
-
-    // MapWidget -> MainWindow (保留备份)
-    // connect(m_mapWidget, &MapWidget::mapClicked,
-    //         this, &MainWindow::onMapClicked);
-
     // 线程状态信号连接
-    connect(m_robotStatusThread, &RobotStatusThread::threadStarted,
+    connect(m_robotStatusThread.get(), &RobotStatusThread::threadStarted,
             this, &MainWindow::onThreadStarted);
-    connect(m_robotStatusThread, &RobotStatusThread::threadStopped,
+    connect(m_robotStatusThread.get(), &RobotStatusThread::threadStopped,
             this, &MainWindow::onThreadStopped);
-    connect(m_robotStatusThread, &RobotStatusThread::threadError,
+    connect(m_robotStatusThread.get(), &RobotStatusThread::threadError,
             this, &MainWindow::onThreadError);
 
-    connect(m_navStatusThread, &NavStatusThread::threadStarted,
+    connect(m_navStatusThread.get(), &NavStatusThread::threadStarted,
             this, &MainWindow::onThreadStarted);
-    connect(m_navStatusThread, &NavStatusThread::threadStopped,
+    connect(m_navStatusThread.get(), &NavStatusThread::threadStopped,
             this, &MainWindow::onThreadStopped);
-    connect(m_navStatusThread, &NavStatusThread::threadError,
+    connect(m_navStatusThread.get(), &NavStatusThread::threadError,
             this, &MainWindow::onThreadError);
 
-    connect(m_systemMonitorThread, &SystemMonitorThread::threadStarted,
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::threadStarted,
             this, &MainWindow::onThreadStarted);
-    connect(m_systemMonitorThread, &SystemMonitorThread::threadStopped,
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::threadStopped,
             this, &MainWindow::onThreadStopped);
-    connect(m_systemMonitorThread, &SystemMonitorThread::threadError,
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::threadError,
             this, &MainWindow::onThreadError);
 
-    connect(m_logThread, &LogThread::threadStarted,
+    connect(m_logThread.get(), &LogThread::threadStarted,
             this, &MainWindow::onThreadStarted);
-    connect(m_logThread, &LogThread::threadStopped,
+    connect(m_logThread.get(), &LogThread::threadStopped,
             this, &MainWindow::onThreadStopped);
-    connect(m_logThread, &LogThread::threadError,
-            this, &MainWindow::onThreadError);
-
-    connect(m_mapThread, &MapThread::threadStarted,
-            this, &MainWindow::onThreadStarted);
-    connect(m_mapThread, &MapThread::threadStopped,
-            this, &MainWindow::onThreadStopped);
-    connect(m_mapThread, &MapThread::threadError,
+    connect(m_logThread.get(), &LogThread::threadError,
             this, &MainWindow::onThreadError);
 
     // 连接过滤控件信号
@@ -292,19 +241,19 @@ void MainWindow::connectSignals()
     connect(ui->actionLogout, &QAction::triggered, this, &MainWindow::onLogout);
 
     // NavigationActionClient信号连接
-    connect(m_navigationClient, &NavigationActionClient::goalAccepted,
+    connect(m_navigationClient.get(), &NavigationActionClient::goalAccepted,
             this, &MainWindow::onGoalAccepted);
-    connect(m_navigationClient, &NavigationActionClient::goalRejected,
+    connect(m_navigationClient.get(), &NavigationActionClient::goalRejected,
             this, &MainWindow::onGoalRejected);
-    connect(m_navigationClient, &NavigationActionClient::feedbackReceived,
+    connect(m_navigationClient.get(), &NavigationActionClient::feedbackReceived,
             this, &MainWindow::onNavigationFeedback);
-    connect(m_navigationClient, &NavigationActionClient::resultReceived,
+    connect(m_navigationClient.get(), &NavigationActionClient::resultReceived,
             this, &MainWindow::onNavigationResult);
-    connect(m_navigationClient, &NavigationActionClient::goalCanceled,
+    connect(m_navigationClient.get(), &NavigationActionClient::goalCanceled,
             this, &MainWindow::onGoalCanceled);
 
     // Nav2ViewWidget信号连接
-    connect(m_nav2ViewWidget, &Nav2ViewWidget::goalPosePreview,
+    connect(m_nav2ViewWidget.get(), &Nav2ViewWidget::goalPosePreview,
             this, [this](double x, double y, double yaw) {
                 m_targetX = x;
                 m_targetY = y;
@@ -314,17 +263,17 @@ void MainWindow::connectSignals()
             });
 
     // Nav2ParameterThread 信号连接
-    connect(m_paramThread, &Nav2ParameterThread::threadStarted,
+    connect(m_paramThread.get(), &Nav2ParameterThread::threadStarted,
             this, &MainWindow::onThreadStarted);
-    connect(m_paramThread, &Nav2ParameterThread::threadStopped,
+    connect(m_paramThread.get(), &Nav2ParameterThread::threadStopped,
             this, &MainWindow::onThreadStopped);
-    connect(m_paramThread, &Nav2ParameterThread::threadError,
+    connect(m_paramThread.get(), &Nav2ParameterThread::threadError,
             this, &MainWindow::onThreadError);
-    connect(m_paramThread, &Nav2ParameterThread::parameterRefreshed,
+    connect(m_paramThread.get(), &Nav2ParameterThread::parameterRefreshed,
             this, &MainWindow::onParameterRefreshed);
-    connect(m_paramThread, &Nav2ParameterThread::parameterApplied,
+    connect(m_paramThread.get(), &Nav2ParameterThread::parameterApplied,
             this, &MainWindow::onParameterApplied);
-    connect(m_paramThread, &Nav2ParameterThread::operationFinished,
+    connect(m_paramThread.get(), &Nav2ParameterThread::operationFinished,
             this, &MainWindow::onParameterOperationFinished);
 
     // Settings Tab 按钮连接
@@ -364,56 +313,75 @@ void MainWindow::connectSignals()
 
 void MainWindow::startAllThreads()
 {
+    // 使用信号槽机制确保线程按顺序启动，替代硬编码延迟
     // 启动顺序：日志 -> 系统监控 -> 机器人状态 -> 导航状态 -> 地图 -> 参数
+
+    // 连接线程启动完成信号到下一个线程的启动槽
+    connect(m_logThread.get(), &LogThread::threadStarted, this, [this]() {
+        QTimer::singleShot(THREAD_START_DELAY_MS, m_systemMonitorThread.get(), [this]() {
+            m_systemMonitorThread->start();
+        });
+    }, Qt::UniqueConnection);
+
+    connect(m_systemMonitorThread.get(), &SystemMonitorThread::threadStarted, this, [this]() {
+        QTimer::singleShot(THREAD_START_DELAY_MS, m_robotStatusThread.get(), [this]() {
+            m_robotStatusThread->start();
+        });
+    }, Qt::UniqueConnection);
+
+    connect(m_robotStatusThread.get(), &RobotStatusThread::threadStarted, this, [this]() {
+        QTimer::singleShot(THREAD_START_DELAY_MS, m_navStatusThread.get(), [this]() {
+            m_navStatusThread->start();
+        });
+    }, Qt::UniqueConnection);
+
+    connect(m_navStatusThread.get(), &NavStatusThread::threadStarted, this, [this]() {
+        QTimer::singleShot(THREAD_START_DELAY_MS, m_paramThread.get(), [this]() {
+            m_paramThread->start();
+        });
+    }, Qt::UniqueConnection);
+
+    // 启动第一个线程
     m_logThread->start();
-    QThread::msleep(100);
-
-    m_systemMonitorThread->start();
-    QThread::msleep(100);
-
-    m_robotStatusThread->start();
-    QThread::msleep(100);
-
-    m_navStatusThread->start();
-    QThread::msleep(100);
-
-    m_mapThread->start();
-    QThread::msleep(100);
-
-    m_paramThread->start();
 }
 
 void MainWindow::stopAllThreads()
 {
     // 停止顺序与启动相反
+    // 使用智能指针的bool转换操作符检查有效性
     if (m_paramThread && m_paramThread->isRunning()) {
         m_paramThread->stopThread();
-        m_paramThread->wait(3000);
-    }
-
-    if (m_mapThread && m_mapThread->isRunning()) {
-        m_mapThread->stopThread();
-        m_mapThread->wait(3000);
+        if (!m_paramThread->wait(THREAD_STOP_TIMEOUT_MS)) {
+            qWarning() << "[MainWindow] 警告：参数线程停止超时";
+        }
     }
 
     if (m_navStatusThread && m_navStatusThread->isRunning()) {
         m_navStatusThread->stopThread();
-        m_navStatusThread->wait(3000);
+        if (!m_navStatusThread->wait(THREAD_STOP_TIMEOUT_MS)) {
+            qWarning() << "[MainWindow] 警告：导航状态线程停止超时";
+        }
     }
 
     if (m_robotStatusThread && m_robotStatusThread->isRunning()) {
         m_robotStatusThread->stopThread();
-        m_robotStatusThread->wait(3000);
+        if (!m_robotStatusThread->wait(THREAD_STOP_TIMEOUT_MS)) {
+            qWarning() << "[MainWindow] 警告：机器人状态线程停止超时";
+        }
     }
 
     if (m_systemMonitorThread && m_systemMonitorThread->isRunning()) {
         m_systemMonitorThread->stopThread();
-        m_systemMonitorThread->wait(3000);
+        if (!m_systemMonitorThread->wait(THREAD_STOP_TIMEOUT_MS)) {
+            qWarning() << "[MainWindow] 警告：系统监控线程停止超时";
+        }
     }
 
     if (m_logThread && m_logThread->isRunning()) {
         m_logThread->stopThread();
-        m_logThread->wait(3000);
+        if (!m_logThread->wait(THREAD_STOP_TIMEOUT_MS)) {
+            qWarning() << "[MainWindow] 警告：日志线程停止超时";
+        }
     }
 }
 
@@ -448,12 +416,8 @@ void MainWindow::onBatteryStatusReceived(float voltage, float percentage)
     }
 
     QString message = QString("电池状态 - 电压: %1 V, 电量: %2%").arg(voltage, 0, 'f', 2).arg(percentage, 0, 'f', 1);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Battery");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "RobotStatus", "Battery");
+    addLogEntry(entry);
 }
 
 void MainWindow::onPositionReceived(double x, double y, double yaw)
@@ -465,12 +429,8 @@ void MainWindow::onPositionReceived(double x, double y, double yaw)
     ui->labelYaw->setText(QString("%1 °").arg(yaw_degrees, 0, 'f', 1));
 
     QString message = QString("位置信息 - X: %1, Y: %2, Yaw: %3").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Position");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "RobotStatus", "Position");
+    addLogEntry(entry);
 }
 
 void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, double vy, double omega)
@@ -483,15 +443,15 @@ void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, d
         ui->labelYaw->setText(QString("%1 °").arg(yaw_degrees, 0, 'f', 1));
     }
 
+    // 更新速度显示
+    ui->labelLinearVel->setText(QString("%1 m/s").arg(vx, 0, 'f', 2));
+    ui->labelAngularVel->setText(QString("%1 rad/s").arg(omega, 0, 'f', 2));
+
     QString message = QString("里程计 - 位置(X:%1, Y:%2, Yaw:%3), 速度(vx:%4, vy:%5, omega:%6)")
         .arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2)
         .arg(vx, 0, 'f', 2).arg(vy, 0, 'f', 2).arg(omega, 0, 'f', 2);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "RobotStatus", "Odometry");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "RobotStatus", "Odometry");
+    addLogEntry(entry);
 }
 
 void MainWindow::onSystemTimeReceived(const QString& time)
@@ -502,19 +462,15 @@ void MainWindow::onSystemTimeReceived(const QString& time)
 
 void MainWindow::onDiagnosticsReceived(const QString& status, int level, const QString& message)
 {
-    int logLevel = LOG_INFO;
-    if (level == 1) logLevel = LOG_WARNING;
-    else if (level == 2) logLevel = LOG_ERROR;
-    else if (level == 3) logLevel = LOG_FATAL;
-    else if (level == 4) logLevel = LOG_DEBUG;
+    LogLevel logLevel = LogLevel::INFO;
+    if (level == 1) logLevel = LogLevel::WARNING;
+    else if (level == 2) logLevel = LogLevel::ERROR;
+    else if (level == 3) logLevel = LogLevel::FATAL;
+    else if (level == 4) logLevel = LogLevel::DEBUG;
 
     QString logMessage = QString("诊断信息 - 状态: %1, 消息: %2").arg(status).arg(message);
     LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "RobotStatus", "Diagnostics");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(logLevel)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    addLogEntry(entry);
 
     if (level >= 2) {
         ui->statusbar->showMessage(QString("诊断警告: %1").arg(message), 5000);
@@ -536,12 +492,8 @@ void MainWindow::onNavigationStatusReceived(int status, const QString& message)
     }
 
     QString logMessage = QString("导航状态 - %1: %2").arg(statusStr).arg(message);
-    LogEntry entry(logMessage, LOG_INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(logMessage, LogLevel::INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
+    addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("导航: %1 - %2").arg(statusStr).arg(message), 3000);
 }
@@ -549,59 +501,25 @@ void MainWindow::onNavigationStatusReceived(int status, const QString& message)
 void MainWindow::onNavigationPathReceived(const QVector<QPointF>& path)
 {
     QString message = QString("导航路径 - 路径点数: %1").arg(path.size());
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
+    addLogEntry(entry);
 
     // Nav2ViewWidget 内部订阅 /plan 话题处理路径显示
-    // if (m_pathVisualizer && m_mapWidget) {
-    //     nav_msgs::msg::Path rosPath;
-    //     rosPath.poses.reserve(path.size());
-    //
-    //     for (const QPointF& point : path) {
-    //         geometry_msgs::msg::PoseStamped pose;
-    //         pose.header.frame_id = "map";
-    //         pose.pose.position.x = point.x();
-    //         pose.pose.position.y = point.y();
-    //         pose.pose.position.z = 0.0;
-    //         rosPath.poses.push_back(pose);
-    //     }
-    //
-    //     double resolution = 0.05;
-    //     double originX = 0.0;
-    //     double originY = 0.0;
-    //     m_pathVisualizer->updatePath(rosPath, resolution, QPointF(originX, originY));
-    // }
 }
 
 // ==================== SystemMonitorThread槽函数 ====================
 
 void MainWindow::onLogMessageReceived(const QString& message, int level, const QDateTime& timestamp)
 {
-    LogEntry entry(message, level, timestamp, "SystemMonitor", "ROS");
-
-    // 1. 添加到 allLogs 完整列表
-    m_allLogs.append(entry);
-
-    // 2. 根据当前勾选的级别，判断是否添加到显示列表
-    if (shouldDisplayLog(level)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, static_cast<LogLevel>(level), timestamp, "SystemMonitor", "ROS");
+    addLogEntry(entry);
 }
 
 void MainWindow::onCollisionDetected(const QString& message)
 {
     QString logMessage = QString("碰撞检测 - %1").arg(message);
-    LogEntry entry(logMessage, LOG_ERROR, QDateTime::currentDateTime(), "SystemMonitor", "Collision");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_ERROR)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(logMessage, LogLevel::ERROR, QDateTime::currentDateTime(), "SystemMonitor", "Collision");
+    addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("警告: %1").arg(message), 5000);
 }
@@ -609,12 +527,8 @@ void MainWindow::onCollisionDetected(const QString& message)
 void MainWindow::onAnomalyDetected(const QString& message)
 {
     QString logMessage = QString("异常检测 - %1").arg(message);
-    LogEntry entry(logMessage, LOG_WARNING, QDateTime::currentDateTime(), "SystemMonitor", "Anomaly");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_WARNING)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(logMessage, LogLevel::WARNING, QDateTime::currentDateTime(), "SystemMonitor", "Anomaly");
+    addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("异常: %1").arg(message), 5000);
 }
@@ -622,12 +536,8 @@ void MainWindow::onAnomalyDetected(const QString& message)
 void MainWindow::onBehaviorTreeLogReceived(const QString& log)
 {
     QString message = QString("行为树日志 - %1").arg(log);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "SystemMonitor", "BehaviorTree");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "SystemMonitor", "BehaviorTree");
+    addLogEntry(entry);
 }
 
 // ==================== LogThread槽函数 ====================
@@ -635,12 +545,8 @@ void MainWindow::onBehaviorTreeLogReceived(const QString& log)
 void MainWindow::onLogFileChanged(const QString& filePath)
 {
     QString message = QString("日志文件变更 - 新文件: %1").arg(filePath);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "LogThread", "File");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "LogThread", "File");
+    addLogEntry(entry);
 }
 
 // ==================== 线程状态槽函数 ====================
@@ -651,35 +557,23 @@ void MainWindow::onConnectionStateChanged(bool connected)
     ui->statusbar->showMessage(QString("ROS连接状态: %1").arg(status), 3000);
 
     QString message = QString("连接状态变更 - %1").arg(status);
-    int logLevel = connected ? LOG_INFO : LOG_WARNING;
+    LogLevel logLevel = connected ? LogLevel::INFO : LogLevel::WARNING;
     LogEntry entry(message, logLevel, QDateTime::currentDateTime(), "System", "Connection");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(logLevel)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    addLogEntry(entry);
 }
 
 void MainWindow::onThreadStarted(const QString& threadName)
 {
     QString message = QString("线程启动 - %1").arg(threadName);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "System", "Thread");
+    addLogEntry(entry);
 }
 
 void MainWindow::onThreadStopped(const QString& threadName)
 {
     QString message = QString("线程停止 - %1").arg(threadName);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "System", "Thread");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "System", "Thread");
+    addLogEntry(entry);
 }
 
 void MainWindow::onThreadError(const QString& error)
@@ -702,26 +596,14 @@ void MainWindow::refreshLogDisplay(bool autoScroll)
 {
     // 获取当前勾选的日志级别
     QSet<int> enabledLevels;
-    if (ui->debugCheckBox->isChecked()) enabledLevels << LOG_DEBUG;
-    if (ui->infoCheckBox->isChecked()) enabledLevels << LOG_INFO;
-    if (ui->warningCheckBox->isChecked()) enabledLevels << LOG_WARNING;
-    if (ui->errorCheckBox->isChecked()) enabledLevels << LOG_ERROR;
-    if (ui->fatalCheckBox->isChecked()) enabledLevels << LOG_FATAL;
+    if (ui->debugCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::DEBUG);
+    if (ui->infoCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::INFO);
+    if (ui->warningCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::WARNING);
+    if (ui->errorCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::ERROR);
+    if (ui->fatalCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::FATAL);
 
-    // 清空当前显示
-    m_logTableModel->clearLogs();
-
-    // 从 allLogs 中筛选符合条件的日志
-    QVector<LogEntry> filteredLogs;
-    for (const auto& log : m_allLogs) {
-        if (enabledLevels.contains(log.level)) {
-            filteredLogs.append(log);
-        }
-    }
-
-    if (!filteredLogs.isEmpty()) {
-        m_logTableModel->addLogEntries(filteredLogs);
-    }
+    // 使用LogFilterProxyModel的过滤功能，避免重建模型
+    m_logFilterProxyModel->setLogLevelFilter(enabledLevels);
 
     if (autoScroll) {
         ui->logTableView->scrollToBottom();
@@ -730,29 +612,17 @@ void MainWindow::refreshLogDisplay(bool autoScroll)
 
 bool MainWindow::shouldDisplayLog(int level) const
 {
-    switch (level) {
-        case LOG_DEBUG:   return ui->debugCheckBox->isChecked();
-        case LOG_INFO:    return ui->infoCheckBox->isChecked();
-        case LOG_WARNING: return ui->warningCheckBox->isChecked();
-        case LOG_ERROR:   return ui->errorCheckBox->isChecked();
-        case LOG_FATAL:   return ui->fatalCheckBox->isChecked();
-        default:          return false;
+    switch (static_cast<LogLevel>(level)) {
+        case LogLevel::DEBUG:   return ui->debugCheckBox->isChecked();
+        case LogLevel::INFO:    return ui->infoCheckBox->isChecked();
+        case LogLevel::WARNING: return ui->warningCheckBox->isChecked();
+        case LogLevel::ERROR:   return ui->errorCheckBox->isChecked();
+        case LogLevel::FATAL:   return ui->fatalCheckBox->isChecked();
+        default:                return false;
     }
 }
 
 // ==================== 地图相关槽函数 ====================
-
-void MainWindow::onMapReceived(const QImage& mapImage, double resolution, double originX, double originY)
-{
-    // Nav2ViewWidget 从 YAML 文件加载地图，不需要处理 /map 话题
-    // if (m_mapWidget) {
-    //     m_mapWidget->setMapImage(mapImage, resolution, originX, originY);
-    // }
-    Q_UNUSED(mapImage)
-    Q_UNUSED(resolution)
-    Q_UNUSED(originX)
-    Q_UNUSED(originY)
-}
 
 void MainWindow::onMapClicked(double x, double y)
 {
@@ -771,32 +641,8 @@ void MainWindow::onMapClicked(double x, double y)
     ui->labelTargetPosition->setText(QString("(%1, %2)").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2));
 
     QString message = QString("地图点击位置: (%1, %2) - 已设置为导航目标").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Map", "Click");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
-}
-
-void MainWindow::onMapConnectionStateChanged(bool connected)
-{
-    QString status = connected ? "已连接" : "已断开";
-    QString message = QString("地图连接状态: %1").arg(status);
-    int logLevel = connected ? LOG_INFO : LOG_WARNING;
-    LogEntry entry(message, logLevel, QDateTime::currentDateTime(), "Map", "Connection");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(logLevel)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
-
-    ui->statusbar->showMessage(QString("地图: %1").arg(status), 3000);
-
-    if (!connected) {
-        qWarning() << "[MainWindow] 地图连接已断开，请检查ROS2环境";
-        QMessageBox::warning(this, "地图连接断开", "地图连接已断开，请检查ROS2环境\n\n可能的原因：\n1. ROS2 节点未启动\n2. 地图服务器未运行\n3. 网络连接问题");
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Map", "Click");
+    addLogEntry(entry);
 }
 
 void MainWindow::onLoadMapFromFile()
@@ -812,21 +658,17 @@ void MainWindow::onLoadMapFromFile()
         return;
     }
 
-    // 删除旧的 Nav2ViewWidget
-    delete m_nav2ViewWidget;
+    // 重置旧的 Nav2ViewWidget
+    m_nav2ViewWidget.reset();
 
     // 创建新的 Nav2ViewWidget 加载新地图
     auto node = std::make_shared<rclcpp::Node>("nav2_view_node");
-    m_nav2ViewWidget = new Nav2ViewWidget(filePath.toStdString(), node, this);
-    ui->nav2MapLayout->addWidget(m_nav2ViewWidget);
+    m_nav2ViewWidget = std::make_unique<Nav2ViewWidget>(filePath.toStdString(), node, this);
+    ui->nav2MapLayout->addWidget(m_nav2ViewWidget.get());
 
     QString message = QString("地图文件加载成功 - 文件: %1").arg(filePath);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Map", "FileLoad");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Map", "FileLoad");
+    addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("地图已加载: %1").arg(QFileInfo(filePath).fileName()), 3000);
 }
@@ -834,33 +676,49 @@ void MainWindow::onLoadMapFromFile()
 void MainWindow::onStartNavigation()
 {
     if (!m_hasTarget) {
-        QMessageBox::warning(this, "提示", "请设置导航目标");
+        QMessageBox::warning(this, tr("提示"), tr("请设置导航目标"));
+        return;
+    }
+
+    // 检查指针有效性
+    if (!m_nav2ViewWidget) {
+        qCritical() << "[MainWindow] 错误：Nav2ViewWidget 未初始化";
+        QMessageBox::critical(this, tr("错误"), tr("导航视图组件未初始化"));
         return;
     }
 
     // 调用 Nav2ViewWidget 发布目标到 /goal_pose 话题
     m_nav2ViewWidget->publishCurrentGoal();
 
-    ui->labelNavigationStatus->setText("导航中...");
+    ui->labelNavigationStatus->setText(tr("导航中..."));
     ui->labelNavigationStatus->setStyleSheet("color: blue;");
 }
 
 void MainWindow::onCancelNavigation()
 {
+    // 检查指针有效性
+    if (!m_navigationClient) {
+        qCritical() << "[MainWindow] 错误：NavigationActionClient 未初始化";
+        QMessageBox::critical(this, tr("错误"), tr("导航客户端未初始化"));
+        return;
+    }
+
     if (!m_navigationClient->isNavigating()) {
-        QMessageBox::information(this, "提示", "无导航任务");
+        QMessageBox::information(this, tr("提示"), tr("无导航任务"));
         return;
     }
 
     bool success = m_navigationClient->cancelGoal();
     if (!success) {
-        QMessageBox::warning(this, "警告", "取消导航失败");
+        QMessageBox::warning(this, tr("警告"), tr("取消导航失败"));
         return;
     }
 
-    m_nav2ViewWidget->clearGoal();
+    if (m_nav2ViewWidget) {
+        m_nav2ViewWidget->clearGoal();
+    }
 
-    ui->labelNavigationStatus->setText("已取消");
+    ui->labelNavigationStatus->setText(tr("已取消"));
     ui->labelNavigationStatus->setStyleSheet("color: orange;");
 }
 
@@ -870,56 +728,84 @@ void MainWindow::onClearGoal()
     m_targetX = 0.0;
     m_targetY = 0.0;
     m_targetYaw = 0.0;
+    m_initialDistance = 0.0;
 
-    // 清除 Nav2ViewWidget 的目标状态
-    m_nav2ViewWidget->clearGoal();
+    // 清除 Nav2ViewWidget 的目标状态，检查指针有效性
+    if (m_nav2ViewWidget) {
+        m_nav2ViewWidget->clearGoal();
+    }
 
-    ui->labelTargetPosition->setText("未设置");
-    ui->labelNavigationStatus->setText("空闲");
+    ui->labelTargetPosition->setText(tr("未设置"));
+    ui->labelNavigationStatus->setText(tr("空闲"));
     ui->labelNavigationStatus->setStyleSheet("color: gray;");
     ui->labelDistanceRemaining->setText("-- m");
     ui->labelNavigationTime->setText("-- s");
     ui->labelRecoveries->setText("0");
+    ui->navigationProgressBar->setValue(0);
+    ui->labelEstimatedTime->setText("--:--");
 }
 
-void MainWindow::onNavigationFeedback(double distanceRemaining, double navigationTime, int recoveries)
+void MainWindow::onNavigationFeedback(double distanceRemaining, double navigationTime, int recoveries, double estimatedTimeRemaining)
 {
     ui->labelDistanceRemaining->setText(QString::number(distanceRemaining, 'f', 2) + " m");
     ui->labelNavigationTime->setText(QString::number(navigationTime, 'f', 1) + " s");
     ui->labelRecoveries->setText(QString::number(recoveries));
 
-    QString message = QString("导航反馈 - 剩余距离: %1m, 导航时间: %2s, 恢复次数: %3")
+    // 第一次收到反馈时记录初始距离
+    if (m_initialDistance <= 0.0 && distanceRemaining > 0.0) {
+        m_initialDistance = distanceRemaining;
+    }
+
+    // 计算导航进度
+    if (m_initialDistance > 0.0 && distanceRemaining >= 0.0) {
+        int progress = static_cast<int>(((m_initialDistance - distanceRemaining) / m_initialDistance) * 100.0);
+        progress = std::max(0, std::min(100, progress));
+        ui->navigationProgressBar->setValue(progress);
+    }
+
+    // 格式化预计剩余时间为 MM:SS 格式
+    int minutes = static_cast<int>(estimatedTimeRemaining) / 60;
+    int seconds = static_cast<int>(estimatedTimeRemaining) % 60;
+    QString timeStr = QString("%1:%2")
+        .arg(minutes, 2, 10, QChar('0'))
+        .arg(seconds, 2, 10, QChar('0'));
+    ui->labelEstimatedTime->setText(timeStr);
+
+    QString message = QString("导航反馈 - 剩余距离: %1m, 导航时间: %2s, 恢复次数: %3, 预计剩余: %4")
         .arg(distanceRemaining, 0, 'f', 2)
         .arg(navigationTime, 0, 'f', 1)
-        .arg(recoveries);
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Navigation", "Feedback");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+        .arg(recoveries)
+        .arg(timeStr);
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation", "Feedback");
+    addLogEntry(entry);
 }
 
 void MainWindow::onNavigationResult(bool success, const QString& message)
 {
+    // 检查指针有效性
+    if (!m_navigationClient) {
+        qCritical() << "[MainWindow] 错误：NavigationActionClient 未初始化";
+        return;
+    }
+
     if (success) {
-        QMessageBox::information(this, "导航完成", "导航成功到达目标点");
-        ui->labelNavigationStatus->setText("导航成功");
+        QMessageBox::information(this, tr("导航完成"), tr("导航成功到达目标点"));
+        ui->labelNavigationStatus->setText(tr("导航成功"));
         ui->labelNavigationStatus->setStyleSheet("color: green;");
+        ui->navigationProgressBar->setValue(100);
     } else {
-        QMessageBox::warning(this, "导航失败", message);
-        ui->labelNavigationStatus->setText("导航失败");
+        QMessageBox::warning(this, tr("导航失败"), message);
+        ui->labelNavigationStatus->setText(tr("导航失败"));
         ui->labelNavigationStatus->setStyleSheet("color: red;");
     }
 
-    QString logMessage = QString("导航结果 - %1: %2").arg(success ? "成功" : "失败").arg(message);
-    int logLevel = success ? LOG_INFO : LOG_WARNING;
+    // 重置初始距离
+    m_initialDistance = 0.0;
+
+    QString logMessage = QString("导航结果 - %1: %2").arg(success ? tr("成功") : tr("失败")).arg(message);
+    LogLevel logLevel = success ? LogLevel::INFO : LogLevel::WARNING;
     LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "Navigation", "Result");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(logLevel)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    addLogEntry(entry);
 }
 
 void MainWindow::onGoalAccepted()
@@ -927,13 +813,12 @@ void MainWindow::onGoalAccepted()
     ui->labelNavigationStatus->setText("导航中...");
     ui->labelNavigationStatus->setStyleSheet("color: blue;");
 
+    // 重置初始距离，将在第一次反馈时设置
+    m_initialDistance = 0.0;
+
     QString message = "导航目标已被接受，开始导航";
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
+    addLogEntry(entry);
     ui->statusbar->showMessage(message, 3000);
 }
 
@@ -944,12 +829,8 @@ void MainWindow::onGoalRejected(const QString& reason)
     ui->labelNavigationStatus->setStyleSheet("color: orange;");
 
     QString message = QString("导航目标被拒绝 - 原因: %1").arg(reason);
-    LogEntry entry(message, LOG_WARNING, QDateTime::currentDateTime(), "Navigation", "Goal");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_WARNING)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::WARNING, QDateTime::currentDateTime(), "Navigation", "Goal");
+    addLogEntry(entry);
 }
 
 void MainWindow::onGoalCanceled()
@@ -959,12 +840,8 @@ void MainWindow::onGoalCanceled()
     ui->labelNavigationStatus->setStyleSheet("color: gray;");
 
     QString message = "导航目标已取消";
-    LogEntry entry(message, LOG_INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
-    m_allLogs.append(entry);
-    if (shouldDisplayLog(LOG_INFO)) {
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-    }
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
+    addLogEntry(entry);
 }
 
 void MainWindow::updateCurrentTime()
@@ -989,209 +866,455 @@ void MainWindow::updateCurrentTime()
 
 void MainWindow::onLoginSuccess(const User& user)
 {
-    qDebug() << "[MainWindow] Login successful for user:" << user.username;
     updateUIBasedOnPermission();
 }
 
 void MainWindow::onLoginFailed(const QString& reason)
 {
-    qDebug() << "[MainWindow] Login failed:" << reason;
 }
 
 void MainWindow::onLogout()
 {
-    m_userAuthManager->logout();
-    m_loginDialog->exec();
+    try {
+        // 检查指针有效性
+        if (!m_userAuthManager) {
+            qCritical() << "[MainWindow] 错误：UserAuthManager 未初始化";
+            QMessageBox::critical(this, tr("错误"), tr("用户认证管理器未初始化"));
+            return;
+        }
 
-    if (!m_userAuthManager->isLoggedIn()) {
-        QMessageBox::critical(this, "错误", "登录失败，程序将退出");
-        exit(1);
+        if (!m_loginDialog) {
+            qCritical() << "[MainWindow] 错误：LoginDialog 未初始化";
+            QMessageBox::critical(this, tr("错误"), tr("登录对话框未初始化"));
+            return;
+        }
+
+        // 检查是否有正在进行的导航操作
+        if (m_hasTarget && m_navigationClient && m_navigationClient->isNavigating()) {
+            QMessageBox::StandardButton reply = QMessageBox::question(
+                this,
+                tr("确认登出"),
+                tr("导航正在进行中，确定要登出吗？"),
+                QMessageBox::Yes | QMessageBox::No
+            );
+            if (reply == QMessageBox::No) {
+                return;
+            }
+            // 取消当前导航目标
+            onClearGoal();
+        }
+
+        m_userAuthManager->logout();
+
+        // 清理当前状态
+        m_hasTarget = false;
+        m_targetX = 0.0;
+        m_targetY = 0.0;
+        m_targetYaw = 0.0;
+
+        // 重新登录循环，添加最大重试次数限制
+        int maxRetries = 3;
+        int retryCount = 0;
+        
+        while (retryCount < maxRetries) {
+            m_loginDialog->exec();
+
+            if (m_userAuthManager->isLoggedIn()) {
+                break;
+            }
+
+            retryCount++;
+            
+            if (retryCount >= maxRetries) {
+                qCritical() << "[MainWindow] 错误：登录重试次数超过限制，程序将退出";
+                QMessageBox::critical(this, tr("登录失败"), 
+                    tr("登录失败次数过多，程序将退出"));
+                QApplication::quit();
+                return;
+            }
+
+            QMessageBox::StandardButton reply = QMessageBox::question(
+                this,
+                tr("登录失败"),
+                tr("登录失败，是否重试？（剩余 %1 次）").arg(maxRetries - retryCount),
+                QMessageBox::Retry | QMessageBox::Cancel
+            );
+
+            if (reply == QMessageBox::Cancel) {
+                this->close();
+                return;
+            }
+        }
+
+        updateUIBasedOnPermission();
+        
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onLogout 发生异常:" << e.what();
+        QMessageBox::critical(this, tr("错误"), 
+            tr("登出过程中发生错误:\n%1").arg(e.what()));
+    } catch (...) {
+        qCritical() << "[MainWindow] onLogout 发生未知异常";
+        QMessageBox::critical(this, tr("错误"), tr("登出过程中发生未知错误"));
     }
-
-    updateUIBasedOnPermission();
 }
 
 void MainWindow::onUserManagement()
 {
-    if (!m_userAuthManager->canAdmin()) {
-        QMessageBox::warning(this, "权限不足", "您没有权限访问用户管理功能");
-        return;
-    }
+    try {
+        // 检查指针有效性
+        if (!m_userAuthManager) {
+            qCritical() << "[MainWindow] 错误：UserAuthManager 未初始化";
+            QMessageBox::critical(this, tr("错误"), tr("用户认证管理器未初始化"));
+            return;
+        }
 
-    m_userManagementDialog = new UserManagementDialog(m_userAuthManager, this);
-    m_userManagementDialog->exec();
-    delete m_userManagementDialog;
-    m_userManagementDialog = nullptr;
+        if (!m_userAuthManager->canAdmin()) {
+            QMessageBox::warning(this, tr("权限不足"), tr("您没有权限访问用户管理功能"));
+            return;
+        }
+
+        UserManagementDialog dialog(m_userAuthManager.get(), this);
+        dialog.exec();
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onUserManagement 发生异常:" << e.what();
+        QMessageBox::critical(this, tr("错误"), 
+            tr("打开用户管理对话框时发生错误:\n%1").arg(e.what()));
+    } catch (...) {
+        qCritical() << "[MainWindow] onUserManagement 发生未知异常";
+        QMessageBox::critical(this, tr("错误"), tr("打开用户管理对话框时发生未知错误"));
+    }
 }
 
 void MainWindow::onChangePassword()
 {
-    ChangePasswordDialog dialog(ChangePasswordDialog::Mode::SelfChange, m_userAuthManager, "", this);
-    dialog.exec();
+    try {
+        // 检查指针有效性
+        if (!m_userAuthManager) {
+            qCritical() << "[MainWindow] 错误：UserAuthManager 未初始化";
+            QMessageBox::critical(this, tr("错误"), tr("用户认证管理器未初始化"));
+            return;
+        }
+
+        ChangePasswordDialog dialog(ChangePasswordDialog::Mode::SelfChange, m_userAuthManager.get(), "", this);
+        dialog.exec();
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onChangePassword 发生异常:" << e.what();
+        QMessageBox::critical(this, tr("错误"), 
+            tr("打开修改密码对话框时发生错误:\n%1").arg(e.what()));
+    } catch (...) {
+        qCritical() << "[MainWindow] onChangePassword 发生未知异常";
+        QMessageBox::critical(this, tr("错误"), tr("打开修改密码对话框时发生未知错误"));
+    }
 }
 
 void MainWindow::updateUIBasedOnPermission()
 {
-    UserPermission permission = m_userAuthManager->getCurrentPermission();
+    try {
+        // 检查指针有效性
+        if (!m_userAuthManager) {
+            qCritical() << "[MainWindow] 错误：UserAuthManager 未初始化";
+            return;
+        }
 
-    bool canOperate = m_userAuthManager->canOperate();
-    bool canAdmin = m_userAuthManager->canAdmin();
+        UserPermission permission = m_userAuthManager->getCurrentPermission();
 
-    ui->btnStartNavigation->setEnabled(canOperate);
-    ui->btnCancelNavigation->setEnabled(canOperate);
-    ui->btnClearGoal->setEnabled(canOperate);
+        bool canOperate = m_userAuthManager->canOperate();
+        bool canAdmin = m_userAuthManager->canAdmin();
 
-    QString permissionText;
-    switch (permission) {
-        case UserPermission::VIEWER:
-            permissionText = "查看者";
-            break;
-        case UserPermission::OPERATOR:
-            permissionText = "操作员";
-            break;
-        case UserPermission::ADMIN:
-            permissionText = "管理员";
-            break;
+        ui->btnStartNavigation->setEnabled(canOperate);
+        ui->btnCancelNavigation->setEnabled(canOperate);
+        ui->btnClearGoal->setEnabled(canOperate);
+
+        QString permissionText;
+        switch (permission) {
+            case UserPermission::VIEWER:
+                permissionText = tr("查看者");
+                break;
+            case UserPermission::OPERATOR:
+                permissionText = tr("操作员");
+                break;
+            case UserPermission::ADMIN:
+                permissionText = tr("管理员");
+                break;
+        }
+
+        QString username = m_userAuthManager->getCurrentUsername();
+        if (username.isEmpty()) {
+            username = tr("未登录");
+        }
+        
+        QString statusText = QString(tr("当前用户: %1 (%2)")).arg(username).arg(permissionText);
+        ui->statusbar->showMessage(statusText, 0);
+
+        qDebug() << "[MainWindow] UI updated based on permission:" << permissionText;
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] updateUIBasedOnPermission 发生异常:" << e.what();
+    } catch (...) {
+        qCritical() << "[MainWindow] updateUIBasedOnPermission 发生未知异常";
     }
-
-    QString statusText = QString("当前用户: %1 (%2)").arg(m_userAuthManager->getCurrentUsername()).arg(permissionText);
-    ui->statusbar->showMessage(statusText, 0);
-
-    qDebug() << "[MainWindow] UI updated based on permission:" << permissionText;
 }
 
 // ==================== Nav2ParameterThread 槽函数 ====================
 
 void MainWindow::onRefreshButtonClicked()
 {
-    m_paramThread->requestRefresh();
-    ui->statusLabel->setText("正在刷新参数...");
-    ui->refreshButton->setEnabled(false);
+    try {
+        // 检查指针有效性
+        if (!m_paramThread) {
+            qCritical() << "[MainWindow] 错误：Nav2ParameterThread 未初始化";
+            QMessageBox::critical(this, tr("错误"), tr("参数线程未初始化"));
+            return;
+        }
+
+        m_paramThread->requestRefresh();
+        ui->statusLabel->setText(tr("正在刷新参数..."));
+        ui->refreshButton->setEnabled(false);
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onRefreshButtonClicked 发生异常:" << e.what();
+        QMessageBox::critical(this, tr("错误"), tr("刷新参数时发生错误:\n%1").arg(e.what()));
+    } catch (...) {
+        qCritical() << "[MainWindow] onRefreshButtonClicked 发生未知异常";
+        QMessageBox::critical(this, tr("错误"), tr("刷新参数时发生未知错误"));
+    }
 }
 
 void MainWindow::onApplyButtonClicked()
 {
-    if (!m_paramThread->hasPendingChanges()) {
-        QMessageBox::information(this, "提示", "没有待应用的更改");
-        return;
-    }
+    try {
+        // 检查指针有效性
+        if (!m_paramThread) {
+            qCritical() << "[MainWindow] 错误：Nav2ParameterThread 未初始化";
+            QMessageBox::critical(this, tr("错误"), tr("参数线程未初始化"));
+            return;
+        }
 
-    auto reply = QMessageBox::question(this, "确认应用",
-        "确定要应用修改的参数到 ROS2 吗？",
-        QMessageBox::Yes | QMessageBox::No);
-    if (reply == QMessageBox::Yes) {
-        m_paramThread->requestApply();
-        ui->statusLabel->setText("正在应用参数...");
-        ui->applyButton->setEnabled(false);
+        if (!m_paramThread->hasPendingChanges()) {
+            QMessageBox::information(this, tr("提示"), tr("没有待应用的更改"));
+            return;
+        }
+
+        auto reply = QMessageBox::question(this, tr("确认应用"),
+            tr("确定要应用修改的参数到 ROS2 吗？"),
+            QMessageBox::Yes | QMessageBox::No);
+        if (reply == QMessageBox::Yes) {
+            m_paramThread->requestApply();
+            ui->statusLabel->setText(tr("正在应用参数..."));
+            ui->applyButton->setEnabled(false);
+        }
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onApplyButtonClicked 发生异常:" << e.what();
+        QMessageBox::critical(this, tr("错误"), tr("应用参数时发生错误:\n%1").arg(e.what()));
+    } catch (...) {
+        qCritical() << "[MainWindow] onApplyButtonClicked 发生未知异常";
+        QMessageBox::critical(this, tr("错误"), tr("应用参数时发生未知错误"));
     }
 }
 
 void MainWindow::onResetButtonClicked()
 {
-    auto reply = QMessageBox::question(this, "确认重置",
-        "确定要将所有参数重置为默认值吗？\n重置后需要点击\"应用更改\"按钮。",
-        QMessageBox::Yes | QMessageBox::No);
-    if (reply == QMessageBox::Yes) {
-        m_paramThread->requestReset();
+    try {
+        // 检查指针有效性
+        if (!m_paramThread) {
+            qCritical() << "[MainWindow] 错误：Nav2ParameterThread 未初始化";
+            QMessageBox::critical(this, tr("错误"), tr("参数线程未初始化"));
+            return;
+        }
+
+        auto reply = QMessageBox::question(this, tr("确认重置"),
+            tr("确定要将所有参数重置为默认值吗？\n重置后需要点击\"应用更改\"按钮。"),
+            QMessageBox::Yes | QMessageBox::No);
+        if (reply == QMessageBox::Yes) {
+            m_paramThread->requestReset();
+        }
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onResetButtonClicked 发生异常:" << e.what();
+        QMessageBox::critical(this, tr("错误"), tr("重置参数时发生错误:\n%1").arg(e.what()));
+    } catch (...) {
+        qCritical() << "[MainWindow] onResetButtonClicked 发生未知异常";
+        QMessageBox::critical(this, tr("错误"), tr("重置参数时发生未知错误"));
     }
 }
 
 void MainWindow::onDiscardButtonClicked()
 {
-    auto reply = QMessageBox::question(this, "确认放弃",
-        "确定要放弃所有未应用的修改吗？",
-        QMessageBox::Yes | QMessageBox::No);
-    if (reply == QMessageBox::Yes) {
-        m_paramThread->requestDiscard();
+    try {
+        // 检查指针有效性
+        if (!m_paramThread) {
+            qCritical() << "[MainWindow] 错误：Nav2ParameterThread 未初始化";
+            QMessageBox::critical(this, tr("错误"), tr("参数线程未初始化"));
+            return;
+        }
+
+        auto reply = QMessageBox::question(this, tr("确认放弃"),
+            tr("确定要放弃所有未应用的修改吗？"),
+            QMessageBox::Yes | QMessageBox::No);
+        if (reply == QMessageBox::Yes) {
+            m_paramThread->requestDiscard();
+        }
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onDiscardButtonClicked 发生异常:" << e.what();
+        QMessageBox::critical(this, tr("错误"), tr("放弃修改时发生错误:\n%1").arg(e.what()));
+    } catch (...) {
+        qCritical() << "[MainWindow] onDiscardButtonClicked 发生未知异常";
+        QMessageBox::critical(this, tr("错误"), tr("放弃修改时发生未知错误"));
     }
 }
 
 void MainWindow::onParameterRefreshed(bool success, const QString& message)
 {
-    ui->statusLabel->setText(message);
-    ui->refreshButton->setEnabled(true);
+    try {
+        ui->statusLabel->setText(message);
+        ui->refreshButton->setEnabled(true);
 
-    if (success) {
-        ui->statusLabel->setStyleSheet("color: green;");
-        // 更新所有参数控件显示
-        auto params = m_paramThread->getAllParams();
-        for (auto it = params.begin(); it != params.end(); ++it) {
-            updateParameterValue(it.key(), it.value().currentValue);
+        if (success) {
+            ui->statusLabel->setStyleSheet("color: green;");
+            // 更新所有参数控件显示
+            if (m_paramThread) {
+                auto params = m_paramThread->getAllParams();
+                for (auto it = params.begin(); it != params.end(); ++it) {
+                    updateParameterValue(it.key(), it.value().currentValue);
+                }
+            }
+        } else {
+            ui->statusLabel->setStyleSheet("color: red;");
         }
-    } else {
-        ui->statusLabel->setStyleSheet("color: red;");
-    }
 
-    QTimer::singleShot(3000, this, [this]() {
-        ui->statusLabel->setText("就绪");
-        ui->statusLabel->setStyleSheet("");
-    });
+        QTimer::singleShot(3000, this, [this]() {
+            ui->statusLabel->setText(tr("就绪"));
+            ui->statusLabel->setStyleSheet("");
+        });
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onParameterRefreshed 发生异常:" << e.what();
+    } catch (...) {
+        qCritical() << "[MainWindow] onParameterRefreshed 发生未知异常";
+    }
 }
 
 void MainWindow::onParameterApplied(bool success, const QString& message, const QStringList& appliedKeys)
 {
-    ui->statusLabel->setText(message);
-    ui->applyButton->setEnabled(true);
+    try {
+        ui->statusLabel->setText(message);
+        ui->applyButton->setEnabled(true);
 
-    if (success) {
-        ui->statusLabel->setStyleSheet("color: green;");
-        // 更新已应用的参数控件显示
-        for (const QString& key : appliedKeys) {
-            Nav2ParameterThread::ParamInfo info;
-            if (m_paramThread->getParamInfo(key, info)) {
-                updateParameterValue(key, info.currentValue);
+        if (success) {
+            ui->statusLabel->setStyleSheet("color: green;");
+            // 更新已应用的参数控件显示
+            if (m_paramThread) {
+                for (const QString& key : appliedKeys) {
+                    Nav2ParameterThread::ParamInfo info;
+                    if (m_paramThread->getParamInfo(key, info)) {
+                        updateParameterValue(key, info.currentValue);
+                    }
+                }
             }
+        } else {
+            ui->statusLabel->setStyleSheet("color: red;");
         }
-    } else {
-        ui->statusLabel->setStyleSheet("color: red;");
-    }
 
-    QTimer::singleShot(3000, this, [this]() {
-        ui->statusLabel->setText("就绪");
-        ui->statusLabel->setStyleSheet("");
-    });
+        QTimer::singleShot(3000, this, [this]() {
+            ui->statusLabel->setText(tr("就绪"));
+            ui->statusLabel->setStyleSheet("");
+        });
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onParameterApplied 发生异常:" << e.what();
+    } catch (...) {
+        qCritical() << "[MainWindow] onParameterApplied 发生未知异常";
+    }
 }
 
 void MainWindow::onParameterOperationFinished(const QString& operation, bool success, const QString& message)
 {
-    ui->statusLabel->setText(message);
+    try {
+        ui->statusLabel->setText(message);
 
-    if (success) {
-        ui->statusLabel->setStyleSheet("color: green;");
-        if (operation == "Reset") {
-            // 重置后更新显示为 pendingValue
-            auto params = m_paramThread->getAllParams();
-            for (auto it = params.begin(); it != params.end(); ++it) {
-                updateParameterValue(it.key(), it.value().pendingValue);
+        if (success) {
+            ui->statusLabel->setStyleSheet("color: green;");
+            if (operation == "Reset" && m_paramThread) {
+                // 重置后更新显示为 pendingValue
+                auto params = m_paramThread->getAllParams();
+                for (auto it = params.begin(); it != params.end(); ++it) {
+                    updateParameterValue(it.key(), it.value().pendingValue);
+                }
             }
+        } else {
+            ui->statusLabel->setStyleSheet("color: red;");
         }
-    } else {
-        ui->statusLabel->setStyleSheet("color: red;");
-    }
 
-    QTimer::singleShot(3000, this, [this]() {
-        ui->statusLabel->setText("就绪");
-        ui->statusLabel->setStyleSheet("");
-    });
+        QTimer::singleShot(3000, this, [this]() {
+            ui->statusLabel->setText(tr("就绪"));
+            ui->statusLabel->setStyleSheet("");
+        });
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onParameterOperationFinished 发生异常:" << e.what();
+    } catch (...) {
+        qCritical() << "[MainWindow] onParameterOperationFinished 发生未知异常";
+    }
 }
 
 void MainWindow::onParameterValueChanged(double value)
 {
-    QDoubleSpinBox* spinBox = qobject_cast<QDoubleSpinBox*>(sender());
-    if (!spinBox) return;
+    try {
+        QDoubleSpinBox* spinBox = qobject_cast<QDoubleSpinBox*>(sender());
+        if (!spinBox) return;
 
-    QString key = spinBox->objectName();
-    // 将控件名转换为参数 key
-    key.replace("SpinBox", "");
+        // 检查指针有效性
+        if (!m_paramThread) {
+            qWarning() << "[MainWindow] 警告：Nav2ParameterThread 未初始化";
+            return;
+        }
 
-    m_paramThread->setPendingValue(key, value);
+        QString key = spinBox->objectName();
+        // 将控件名转换为参数 key
+        key.replace("SpinBox", "");
+
+        m_paramThread->setPendingValue(key, value);
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] onParameterValueChanged 发生异常:" << e.what();
+    } catch (...) {
+        qCritical() << "[MainWindow] onParameterValueChanged 发生未知异常";
+    }
 }
 
 void MainWindow::updateParameterValue(const QString& key, const QVariant& value)
 {
-    QString objectName = key + "SpinBox";
-    QDoubleSpinBox* spinBox = findChild<QDoubleSpinBox*>(objectName);
-    if (spinBox) {
-        spinBox->setValue(value.toDouble());
+    try {
+        QString objectName = key + "SpinBox";
+        QDoubleSpinBox* spinBox = findChild<QDoubleSpinBox*>(objectName);
+        if (spinBox) {
+            spinBox->setValue(value.toDouble());
+        }
+    } catch (const std::exception& e) {
+        qCritical() << "[MainWindow] updateParameterValue 发生异常:" << e.what();
+    } catch (...) {
+        qCritical() << "[MainWindow] updateParameterValue 发生未知异常";
     }
+}
+
+void MainWindow::addLogEntry(const LogEntry& entry)
+{
+    m_allLogs.append(entry);
+
+    if (m_allLogs.size() > MAX_ALL_LOGS_SIZE) {
+        int removeCount = m_allLogs.size() - MAX_ALL_LOGS_SIZE;
+        for (int i = 0; i < removeCount; ++i) {
+            m_allLogs.removeFirst();
+        }
+    }
+
+    // 直接添加到模型，由LogFilterProxyModel负责过滤显示
+    m_logTableModel->addLogEntry(entry);
+    ui->logTableView->scrollToBottom();
+}
+
+QString MainWindow::getMapPathFromRosParam(rclcpp::Node::SharedPtr node)
+{
+    if (!node) return QString();
+    node->declare_parameter("map_yaml_path", "");
+    std::string map_path = node->get_parameter("map_yaml_path").as_string();
+    if (map_path.empty()) {
+        // 回退到默认路径
+        return QStandardPaths::writableLocation(QStandardPaths::HomeLocation) +
+               "/wheeltec_ros2/src/renwu/map/DisplaySimulationMap.yaml";
+    }
+    return QString::fromStdString(map_path);
 }

@@ -1,6 +1,7 @@
 #ifndef LOGSTORAGEENGINE_H
 #define LOGSTORAGEENGINE_H
 
+#include "loglevel.h"
 #include <QObject>
 #include <QString>
 #include <QDateTime>
@@ -9,25 +10,20 @@
 #include <QSqlDatabase>
 #include <QSqlError>
 
-enum StorageLogLevel {
-    STORAGE_LOG_DEBUG = 0,
-    STORAGE_LOG_INFO = 1,
-    STORAGE_LOG_WARNING = 2,
-    STORAGE_LOG_ERROR = 3,
-    STORAGE_LOG_FATAL = 4
-};
+// 使用统一的LogLevel定义
+using StorageLogLevel = LogLevel;
 
 struct StorageLogEntry {
     QString message;
-    int level;
+    LogLevel level;
     QDateTime timestamp;
     QString source;
     QString category;
     QString filePath;
     int lineNumber;
 
-    StorageLogEntry() : level(STORAGE_LOG_INFO), lineNumber(0) {}
-    StorageLogEntry(const QString& msg, int lvl, const QDateTime& ts,
+    StorageLogEntry() : level(LogLevel::INFO), lineNumber(0) {}
+    StorageLogEntry(const QString& msg, LogLevel lvl, const QDateTime& ts,
                      const QString& src = "", const QString& cat = "",
                      const QString& file = "", int line = 0)
         : message(msg), level(lvl), timestamp(ts), source(src), category(cat),
@@ -53,7 +49,7 @@ public:
 
     QVector<StorageLogEntry> queryLogs(const QDateTime& startTime,
                                         const QDateTime& endTime,
-                                        int minLevel = -1,
+                                        LogLevel minLevel = LogLevel::DEBUG,
                                         const QString& source = QString(),
                                         const QString& keyword = QString(),
                                         int limit = -1,
@@ -61,7 +57,7 @@ public:
 
     int getLogCount(const QDateTime& startTime = QDateTime(),
                     const QDateTime& endTime = QDateTime(),
-                    int minLevel = -1);
+                    LogLevel minLevel = LogLevel::DEBUG);
 
     bool clearLogs(const QDateTime& beforeTime = QDateTime());
     bool vacuum();
@@ -76,7 +72,6 @@ signals:
 private:
     bool createTables();
     bool createIndexes();
-    QString levelToString(int level);
 
 private:
     QSqlDatabase m_database;

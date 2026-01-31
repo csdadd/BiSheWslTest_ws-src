@@ -46,6 +46,7 @@ private:
     QDateTime m_endTime;
     QString m_regExpFilter;
     bool m_useRegExp;
+    mutable QRegularExpression m_cachedRegExp;
 };
 
 #endif // LOGFILTERPROXYMODEL_H

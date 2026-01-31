@@ -3,6 +3,8 @@
 
 #include <QMainWindow>
 #include <QThreadPool>
+#include <QStandardPaths>
+#include <memory>
 #include "robotstatusthread.h"
 #include "navstatusthread.h"
 #include "systemmonitorthread.h"
@@ -10,7 +12,6 @@
 #include "logtablemodel.h"
 #include "logfilterproxymodel.h"
 #include "logquerytask.h"
-#include "mapthread.h"
 #include "mapwidget.h"
 #include "mapcache.h"
 #include "nav2viewwidget.h"
@@ -35,6 +36,13 @@ class MainWindow : public QMainWindow
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+
+    /**
+     * @brief 初始化主窗口
+     * @return 初始化成功返回true，失败返回false
+     * @details 两阶段初始化，避免构造函数中调用exit或close
+     */
+    bool initialize();
 
 
 private slots:
@@ -69,15 +77,13 @@ private slots:
     void onFilterChanged();
 
     // 地图相关槽函数
-    void onMapReceived(const QImage& mapImage, double resolution, double originX, double originY);
     void onMapClicked(double x, double y);
-    void onMapConnectionStateChanged(bool connected);
     void onLoadMapFromFile();
 
     void onStartNavigation();
     void onCancelNavigation();
     void onClearGoal();
-    void onNavigationFeedback(double distanceRemaining, double navigationTime, int recoveries);
+    void onNavigationFeedback(double distanceRemaining, double navigationTime, int recoveries, double estimatedTimeRemaining);
     void onNavigationResult(bool success, const QString& message);
     void onGoalAccepted();
     void onGoalRejected(const QString& reason);
@@ -109,34 +115,45 @@ private:
     Q_INVOKABLE void refreshLogDisplay(bool autoScroll = true);
     Q_INVOKABLE bool shouldDisplayLog(int level) const;
     void updateParameterValue(const QString& key, const QVariant& value);
+    void addLogEntry(const LogEntry& entry);
 
 private:
     Ui::MainWindow *ui;
+    
+    static constexpr int THREAD_START_DELAY_MS = 100;     // 线程启动延迟时间
+    static constexpr int THREAD_STOP_TIMEOUT_MS = 3000;   // 线程停止超时时间
+    
+    // 从ROS参数获取地图路径
+    static QString getMapPathFromRosParam(rclcpp::Node::SharedPtr node);
 
-    RobotStatusThread* m_robotStatusThread;
-    NavStatusThread* m_navStatusThread;
-    SystemMonitorThread* m_systemMonitorThread;
-    LogThread* m_logThread;
-    LogTableModel* m_logTableModel;
-    LogFilterProxyModel* m_logFilterProxyModel;
+    // 使用智能指针管理线程生命周期，避免内存泄漏和悬空指针
+    std::unique_ptr<RobotStatusThread> m_robotStatusThread;
+    std::unique_ptr<NavStatusThread> m_navStatusThread;
+    std::unique_ptr<SystemMonitorThread> m_systemMonitorThread;
+    std::unique_ptr<LogThread> m_logThread;
+    std::unique_ptr<LogStorageEngine> m_logStorage;
+    std::unique_ptr<LogTableModel> m_logTableModel;
+    std::unique_ptr<LogFilterProxyModel> m_logFilterProxyModel;
     QList<LogEntry> m_allLogs;
-    MapThread* m_mapThread;
-    Nav2ViewWidget* m_nav2ViewWidget;
-    // MapWidget* m_mapWidget;  // 保留备份
-    MapCache* m_mapCache;
-    NavigationActionClient* m_navigationClient;
-    PathVisualizer* m_pathVisualizer;
+    static constexpr int MAX_ALL_LOGS_SIZE = 10000;
+    std::unique_ptr<Nav2ViewWidget> m_nav2ViewWidget;
+    // std::unique_ptr<MapWidget> m_mapWidget;  // 保留备份
+    std::unique_ptr<MapCache> m_mapCache;
+    std::unique_ptr<NavigationActionClient> m_navigationClient;
+    std::unique_ptr<PathVisualizer> m_pathVisualizer;
     double m_targetX;
     double m_targetY;
     double m_targetYaw;
     bool m_hasTarget;
     QDateTime m_startTime;
+    double m_initialDistance;
 
-    UserStorageEngine* m_userStorageEngine;
-    UserAuthManager* m_userAuthManager;
-    LoginDialog* m_loginDialog;
-    UserManagementDialog* m_userManagementDialog;
-    Nav2ParameterThread* m_paramThread;
+    // 用户认证模块使用智能指针管理
+    std::unique_ptr<UserStorageEngine> m_userStorageEngine;
+    std::unique_ptr<UserAuthManager> m_userAuthManager;
+    std::unique_ptr<LoginDialog> m_loginDialog;
+    std::unique_ptr<UserManagementDialog> m_userManagementDialog;
+    std::unique_ptr<Nav2ParameterThread> m_paramThread;
 };
 
 #endif // MAINWINDOW_H

@@ -15,6 +15,9 @@ class UserManagementDialog : public QDialog
     Q_OBJECT
 
 public:
+    static constexpr int DIALOG_WIDTH = 700;
+    static constexpr int DIALOG_HEIGHT = 500;
+
     explicit UserManagementDialog(UserAuthManager* authManager, QWidget* parent = nullptr);
     ~UserManagementDialog();
 
@@ -34,8 +37,6 @@ private:
     void setupConnections();
     void loadUsers();
     void addUserToTable(const User& user);
-    QString permissionToString(UserPermission permission);
-    UserPermission stringToPermission(const QString& str);
 
     Ui::UserManagementDialog* ui;
     UserAuthManager* m_authManager;

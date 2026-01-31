@@ -1,4 +1,5 @@
 #include "testlogtablemodel.h"
+#include "loglevel.h"
 
 void TestLogTableModel::initTestCase()
 {
@@ -157,7 +158,7 @@ void TestLogTableModel::testSetStorageEngine()
 void TestLogTableModel::testLoadFromDatabase()
 {
     for (int i = 0; i < 5; ++i) {
-        StorageLogEntry entry(QString("Message %1").arg(i), STORAGE_LOG_INFO, QDateTime::currentDateTime());
+        StorageLogEntry entry(QString("Message %1").arg(i), LOG_INFO, QDateTime::currentDateTime());
         m_storageEngine->insertLog(entry);
     }
 
@@ -169,7 +170,7 @@ void TestLogTableModel::testLoadFromDatabase()
 void TestLogTableModel::testAppendFromDatabase()
 {
     for (int i = 0; i < 5; ++i) {
-        StorageLogEntry entry(QString("Message %1").arg(i), STORAGE_LOG_INFO, QDateTime::currentDateTime());
+        StorageLogEntry entry(QString("Message %1").arg(i), LOG_INFO, QDateTime::currentDateTime());
         m_storageEngine->insertLog(entry);
     }
 
@@ -198,7 +199,7 @@ void TestLogTableModel::testLevelToString()
 
 void TestLogTableModel::testConvertStorageEntry()
 {
-    StorageLogEntry storageEntry("Test message", STORAGE_LOG_INFO, QDateTime::currentDateTime(), "TestSource", "TestCategory");
+    StorageLogEntry storageEntry("Test message", LOG_INFO, QDateTime::currentDateTime(), "TestSource", "TestCategory");
     m_storageEngine->insertLog(storageEntry);
 
     m_model->loadFromDatabase();

@@ -4,6 +4,7 @@
 #include <QAbstractTableModel>
 #include <QVector>
 #include <QDateTime>
+#include <QTimer>
 #include "logthread.h"
 #include "logstorageengine.h"
 
@@ -32,26 +33,40 @@ public:
     void setStorageEngine(LogStorageEngine* engine);
     void loadFromDatabase(const QDateTime& startTime = QDateTime(),
                           const QDateTime& endTime = QDateTime(),
-                          int minLevel = -1,
+                          LogLevel minLevel = LogLevel::DEBUG,
                           const QString& source = QString(),
                           const QString& keyword = QString(),
                           int limit = -1);
     void appendFromDatabase(const QDateTime& startTime = QDateTime(),
                             const QDateTime& endTime = QDateTime(),
-                            int minLevel = -1,
+                            LogLevel minLevel = LogLevel::DEBUG,
                             const QString& source = QString(),
                             const QString& keyword = QString(),
                             int limit = -1);
 
+    // 批量更新控制
+    void setBatchUpdateEnabled(bool enabled);
+    void setBatchUpdateInterval(int ms);
+    void flushPendingLogs();
+
+private slots:
+    void onBatchUpdateTimer();
+
 private:
     void enforceMaxLogs();
-    QString levelToString(int level) const;
     LogEntry convertStorageEntry(const StorageLogEntry& storageEntry) const;
 
 private:
     QVector<LogEntry> m_logs;
     int m_maxLogs;
     LogStorageEngine* m_storageEngine;
+
+    // 批量更新相关
+    QTimer* m_batchUpdateTimer;
+    QVector<LogEntry> m_pendingLogs;
+    bool m_batchUpdateEnabled;
+    int m_batchUpdateInterval;
+    static constexpr int BATCH_THRESHOLD = 100;
 };
 
 #endif // LOGTABLEMODEL_H

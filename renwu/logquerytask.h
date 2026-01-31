@@ -15,7 +15,7 @@ public:
     explicit LogQueryTask(LogStorageEngine* engine,
                          const QDateTime& startTime,
                          const QDateTime& endTime,
-                         int minLevel = -1,
+                         LogLevel minLevel = LogLevel::DEBUG,
                          const QString& source = QString(),
                          const QString& keyword = QString(),
                          int limit = -1,
@@ -33,7 +33,7 @@ private:
     LogStorageEngine* m_engine;
     QDateTime m_startTime;
     QDateTime m_endTime;
-    int m_minLevel;
+    LogLevel m_minLevel;
     QString m_source;
     QString m_keyword;
     int m_limit;

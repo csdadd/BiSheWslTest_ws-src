@@ -39,6 +39,7 @@ public:
     QString getLastError() const;
 
     static QString hashPassword(const QString& password);
+    static bool verifyPassword(const QString& password, const QString& storedHash);
 
 signals:
     void userInserted(const User& user);
@@ -49,12 +50,11 @@ signals:
 private:
     bool createTables();
     bool createIndexes();
-    QString permissionToString(UserPermission permission);
-    UserPermission stringToPermission(const QString& str);
 
 private:
     QSqlDatabase m_database;
     QString m_dbPath;
+    QString m_connectionName;
     bool m_initialized;
     mutable QReadWriteLock m_lock;
     QString m_lastError;

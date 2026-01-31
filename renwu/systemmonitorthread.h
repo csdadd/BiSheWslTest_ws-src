@@ -5,29 +5,26 @@
 #include "roscontextmanager.h"
 #include "threadsafequeue.h"
 #include "logstorageengine.h"
+#include "loglevel.h"
+#include <memory>
 #include <rclcpp/rclcpp.hpp>
 #include <rcl_interfaces/msg/log.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <nav2_msgs/msg/behavior_tree_log.hpp>
 #include <QDateTime>
 
-enum MonitorLogLevel {
-    MONITOR_LOG_DEBUG = 0,
-    MONITOR_LOG_INFO = 1,
-    MONITOR_LOG_WARNING = 2,
-    MONITOR_LOG_ERROR = 3,
-    MONITOR_LOG_FATAL = 4
-};
+// 使用统一的LogLevel定义
+using MonitorLogLevel = LogLevel;
 
 struct MonitorLogEntry {
     QString message;
-    int level;
+    LogLevel level;
     QDateTime timestamp;
     QString source;
     QString category;
 
-    MonitorLogEntry() : level(MONITOR_LOG_INFO) {}
-    MonitorLogEntry(const QString& msg, int lvl, const QDateTime& ts,
+    MonitorLogEntry() : level(LogLevel::INFO) {}
+    MonitorLogEntry(const QString& msg, LogLevel lvl, const QDateTime& ts,
                     const QString& src = "", const QString& cat = "")
         : message(msg), level(lvl), timestamp(ts), source(src), category(cat) {}
 };
@@ -37,7 +34,7 @@ class SystemMonitorThread : public BaseThread
     Q_OBJECT
 
 public:
-    explicit SystemMonitorThread(QObject* parent = nullptr);
+    explicit SystemMonitorThread(LogStorageEngine* storageEngine, QObject* parent = nullptr);
     ~SystemMonitorThread();
 
 public slots:
@@ -60,7 +57,6 @@ private:
     void processROSLog(const rcl_interfaces::msg::Log::SharedPtr msg);
     void processCollisionData(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
     void processBehaviorTreeLog(const nav2_msgs::msg::BehaviorTreeLog::SharedPtr msg);
-    QString levelToString(int level);
 
 private:
     rclcpp::Node::SharedPtr m_rosNode;
@@ -72,6 +68,8 @@ private:
 
     ThreadSafeQueue<MonitorLogEntry> m_logQueue;
     LogStorageEngine* m_storageEngine;
+
+    int m_processCount = 0;
 };
 
 #endif // SYSTEMMONITORTHREAD_H

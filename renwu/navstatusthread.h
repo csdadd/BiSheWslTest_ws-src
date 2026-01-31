@@ -39,6 +39,8 @@ private:
 
     rclcpp::Subscription<action_msgs::msg::GoalStatusArray>::SharedPtr m_navStatusSub;
     rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr m_navPathSub;
+
+    int m_processCount = 0;
 };
 
 #endif // NAVSTATUSTHREAD_H

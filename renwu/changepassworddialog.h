@@ -14,6 +14,10 @@ class ChangePasswordDialog : public QDialog
     Q_OBJECT
 
 public:
+    static constexpr int DIALOG_WIDTH = 350;
+    static constexpr int DIALOG_HEIGHT_WITH_OLD_PASSWORD = 250;
+    static constexpr int DIALOG_HEIGHT_WITHOUT_OLD_PASSWORD = 200;
+
     enum class Mode {
         SelfChange,      // 用户自己修改（需要旧密码）
         AdminReset       // 管理员重置（不需要旧密码）

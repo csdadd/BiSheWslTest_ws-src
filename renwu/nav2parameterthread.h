@@ -5,12 +5,12 @@
 
 #include "basethread.h"
 #include "roscontextmanager.h"
+#include "threadsafequeue.h"
 
 #include <QObject>
 #include <QString>
 #include <QVariant>
 #include <QMap>
-#include <QQueue>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QDebug>
@@ -96,9 +96,8 @@ private:
     rclcpp::Node::SharedPtr m_node;
     // 使用基类的 m_executor（在 BaseThread 中定义），不需要创建额外的 executor
     QMap<QString, ParamInfo> m_params;
-    QQueue<ParamTask> m_taskQueue;
+    ThreadSafeQueue<ParamTask> m_taskQueue;
     mutable QMutex m_paramsMutex;
-    mutable QMutex m_queueMutex;
     bool m_initialized;
 };
 

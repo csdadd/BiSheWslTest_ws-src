@@ -15,6 +15,9 @@ class AddUserDialog : public QDialog
     Q_OBJECT
 
 public:
+    static constexpr int DIALOG_WIDTH = 350;
+    static constexpr int DIALOG_HEIGHT = 300;
+
     explicit AddUserDialog(UserAuthManager* authManager, QWidget* parent = nullptr);
     ~AddUserDialog();
 

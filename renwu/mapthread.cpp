@@ -36,14 +36,17 @@ void MapThread::initialize()
 
     m_mapReceived = false;
     m_reconnectCount = 0;
+    m_retryCount = 0;
+    m_successCount = 0;
     emit connectionStateChanged(true);
 
-    m_updateTimer = new QTimer();
+    // 设置父对象为this，确保自动内存管理
+    m_updateTimer = new QTimer(this);
     m_updateTimer->setInterval(250);
     connect(m_updateTimer, &QTimer::timeout, this, &MapThread::emitMapUpdate);
     m_updateTimer->start();
 
-    m_reconnectTimer = new QTimer();
+    m_reconnectTimer = new QTimer(this);
     m_reconnectTimer->setInterval(5000);
     connect(m_reconnectTimer, &QTimer::timeout, this, &MapThread::attemptReconnect);
 }
@@ -55,22 +58,20 @@ void MapThread::process()
     }
 
     if (!m_mapReceived) {
-        static int retryCount = 0;
-        retryCount++;
+        m_retryCount++;
 
-        if (retryCount % 100 == 0) {
-            qWarning() << "[MapThread] 等待地图数据... 重试次数:" << retryCount;
+        if (m_retryCount % 100 == 0) {
+            qWarning() << "[MapThread] 等待地图数据... 重试次数:" << m_retryCount;
 
             if (!m_reconnectTimer->isActive() && m_reconnectCount < MAX_RECONNECT_ATTEMPTS) {
                 m_reconnectTimer->start();
             }
         }
     } else {
-        static int successCount = 0;
-        successCount++;
+        m_successCount++;
 
-        if (successCount % 1000 == 0) {
-            qDebug() << "[MapThread] 地图连接正常 - 成功接收次数:" << successCount;
+        if (m_successCount % 1000 == 0) {
+            qDebug() << "[MapThread] 地图连接正常 - 成功接收次数:" << m_successCount;
         }
 
         if (m_reconnectTimer->isActive()) {
