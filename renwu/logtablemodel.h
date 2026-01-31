@@ -13,6 +13,11 @@ class LogTableModel : public QAbstractTableModel
     Q_OBJECT
 
 public:
+    // 自定义角色，用于获取原始日志级别（整数）
+    enum LogRoles {
+        LevelRole = Qt::UserRole + 1
+    };
+
     explicit LogTableModel(QObject* parent = nullptr);
     ~LogTableModel();
 

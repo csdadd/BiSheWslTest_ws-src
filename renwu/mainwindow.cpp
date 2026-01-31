@@ -62,9 +62,18 @@ bool MainWindow::initialize()
     ROSContextManager::instance().initialize();
 
     // 创建 Nav2ViewWidget，从ROS参数获取地图路径
-    auto node = std::make_shared<rclcpp::Node>("nav2_view_node");
-    std::string map_path = getMapPathFromRosParam(node).toStdString();
-    m_nav2ViewWidget = std::make_unique<Nav2ViewWidget>(map_path, node, this);
+    m_nav2ViewNode = std::make_shared<rclcpp::Node>("nav2_view_node");
+    std::string map_path = getMapPathFromRosParam(m_nav2ViewNode).toStdString();
+    m_nav2ViewWidget = std::make_unique<Nav2ViewWidget>(map_path, m_nav2ViewNode, this);
+
+    // 创建定时器定期 spin Nav2ViewWidget 的 node，确保话题回调被处理
+    m_rosSpinTimer = new QTimer(this);
+    connect(m_rosSpinTimer, &QTimer::timeout, this, [this]() {
+        if (m_nav2ViewNode) {
+            rclcpp::spin_some(m_nav2ViewNode);
+        }
+    });
+    m_rosSpinTimer->start(50);  // 每 50ms spin 一次
 
     // 连接地图加载信号，处理加载失败情况
     connect(m_nav2ViewWidget.get(), &Nav2ViewWidget::mapLoadFailed,
@@ -107,6 +116,11 @@ bool MainWindow::initialize()
 
 MainWindow::~MainWindow()
 {
+    // 停止 ROS spin 定时器
+    if (m_rosSpinTimer) {
+        m_rosSpinTimer->stop();
+    }
+
     stopAllThreads();
 
     // 智能指针自动管理资源，无需手动delete
@@ -151,11 +165,12 @@ void MainWindow::connectSignals()
     connect(m_robotStatusThread.get(), &RobotStatusThread::logMessage,
             m_logThread.get(), &LogThread::writeLog);
 
-    // NavStatusThread信号连接
-    connect(m_navStatusThread.get(), &NavStatusThread::navigationStatusReceived,
-            this, &MainWindow::onNavigationStatusReceived);
-    connect(m_navStatusThread.get(), &NavStatusThread::navigationPathReceived,
-            this, &MainWindow::onNavigationPathReceived);
+    // NavStatusThread信号连接 - 已禁用，改用NavigationActionClient回调
+    // 原因：/navigate_to_pose/_action/status 话题不存在
+    // connect(m_navStatusThread.get(), &NavStatusThread::navigationStatusReceived,
+    //         this, &MainWindow::onNavigationStatusReceived);
+    // connect(m_navStatusThread.get(), &NavStatusThread::navigationPathReceived,
+    //         this, &MainWindow::onNavigationPathReceived);
     connect(m_navStatusThread.get(), &NavStatusThread::connectionStateChanged,
             this, &MainWindow::onConnectionStateChanged);
 
@@ -229,6 +244,10 @@ void MainWindow::connectSignals()
     connect(ui->warningCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
     connect(ui->errorCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
     connect(ui->fatalCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
+
+    // 连接日志按钮信号
+    connect(ui->clearLogButton, &QPushButton::clicked, this, &MainWindow::onClearLogByLevel);
+    connect(ui->pauseLogButton, &QPushButton::toggled, this, &MainWindow::onPauseLogToggled);
 
     // 连接按钮信号
     connect(ui->btnStartNavigation, &QPushButton::clicked, this, &MainWindow::onStartNavigation);
@@ -622,6 +641,48 @@ bool MainWindow::shouldDisplayLog(int level) const
     }
 }
 
+void MainWindow::onClearLogByLevel()
+{
+    // 获取当前勾选的日志级别
+    QSet<int> levelsToClear;
+    if (ui->debugCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::DEBUG);
+    if (ui->infoCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::INFO);
+    if (ui->warningCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::WARNING);
+    if (ui->errorCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::ERROR);
+    if (ui->fatalCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::FATAL);
+
+    // 从内存中清除对应级别的日志（仅影响显示，不影响数据库和文件中的日志）
+    int clearedCount = 0;
+    for (auto it = m_allLogs.begin(); it != m_allLogs.end(); ) {
+        if (levelsToClear.contains(static_cast<int>(it->level))) {
+            it = m_allLogs.erase(it);
+            ++clearedCount;
+        } else {
+            ++it;
+        }
+    }
+
+    // 刷新模型显示
+    m_logTableModel->clearLogs();
+    for (const auto& entry : m_allLogs) {
+        m_logTableModel->addLogEntry(entry);
+    }
+
+    ui->statusbar->showMessage(QString("已清除 %1 条勾选类型的日志（仅显示）").arg(clearedCount), 3000);
+}
+
+void MainWindow::onPauseLogToggled(bool checked)
+{
+    m_logPaused = checked;
+    if (checked) {
+        ui->pauseLogButton->setText("继续接收");
+        ui->statusbar->showMessage("日志接收已暂停", 3000);
+    } else {
+        ui->pauseLogButton->setText("暂停接收");
+        ui->statusbar->showMessage("日志接收已恢复", 3000);
+    }
+}
+
 // ==================== 地图相关槽函数 ====================
 
 void MainWindow::onMapClicked(double x, double y)
@@ -687,30 +748,47 @@ void MainWindow::onStartNavigation()
         return;
     }
 
-    // 调用 Nav2ViewWidget 发布目标到 /goal_pose 话题
-    m_nav2ViewWidget->publishCurrentGoal();
-
-    ui->labelNavigationStatus->setText(tr("导航中..."));
-    ui->labelNavigationStatus->setStyleSheet("color: blue;");
-}
-
-void MainWindow::onCancelNavigation()
-{
-    // 检查指针有效性
     if (!m_navigationClient) {
         qCritical() << "[MainWindow] 错误：NavigationActionClient 未初始化";
         QMessageBox::critical(this, tr("错误"), tr("导航客户端未初始化"));
         return;
     }
 
-    if (!m_navigationClient->isNavigating()) {
-        QMessageBox::information(this, tr("提示"), tr("无导航任务"));
+    // 调用 Nav2ViewWidget 发布目标到 /goal_pose 话题
+    m_nav2ViewWidget->publishCurrentGoal();
+
+    // 计算初始距离（直线距离）用于进度计算
+    if (m_nav2ViewWidget) {
+        double currentX = m_nav2ViewWidget->getRobotX();
+        double currentY = m_nav2ViewWidget->getRobotY();
+        double dx = m_targetX - currentX;
+        double dy = m_targetY - currentY;
+        m_initialDistance = std::sqrt(dx * dx + dy * dy);
+        qInfo() << "[MainWindow] 初始距离设置为:" << m_initialDistance << "米";
+    } else {
+        m_initialDistance = 0.0;
+    }
+
+    // 通过 ActionClient 发送导航目标
+    m_navigationClient->sendGoal(m_targetX, m_targetY, m_targetYaw);
+
+    ui->labelNavigationStatus->setText(tr("导航中"));
+    ui->labelNavigationStatus->setStyleSheet("color: blue;");
+}
+
+void MainWindow::onCancelNavigation()
+{
+    if (!m_navigationClient) {
+        qCritical() << "[MainWindow] 错误：NavigationActionClient 未初始化";
+        QMessageBox::critical(this, tr("错误"), tr("导航客户端未初始化"));
         return;
     }
 
+    // 移除 isNavigating() 检查，直接尝试取消
+    // 原因：客户端状态可能与服务端不同步
     bool success = m_navigationClient->cancelGoal();
     if (!success) {
-        QMessageBox::warning(this, tr("警告"), tr("取消导航失败"));
+        QMessageBox::information(this, tr("提示"), tr("无导航任务或取消失败"));
         return;
     }
 
@@ -747,35 +825,49 @@ void MainWindow::onClearGoal()
 
 void MainWindow::onNavigationFeedback(double distanceRemaining, double navigationTime, int recoveries, double estimatedTimeRemaining)
 {
+    // 更新剩余距离
     ui->labelDistanceRemaining->setText(QString::number(distanceRemaining, 'f', 2) + " m");
-    ui->labelNavigationTime->setText(QString::number(navigationTime, 'f', 1) + " s");
-    ui->labelRecoveries->setText(QString::number(recoveries));
 
-    // 第一次收到反馈时记录初始距离
-    if (m_initialDistance <= 0.0 && distanceRemaining > 0.0) {
-        m_initialDistance = distanceRemaining;
-    }
-
-    // 计算导航进度
-    if (m_initialDistance > 0.0 && distanceRemaining >= 0.0) {
-        int progress = static_cast<int>(((m_initialDistance - distanceRemaining) / m_initialDistance) * 100.0);
-        progress = std::max(0, std::min(100, progress));
-        ui->navigationProgressBar->setValue(progress);
-    }
-
-    // 格式化预计剩余时间为 MM:SS 格式
-    int minutes = static_cast<int>(estimatedTimeRemaining) / 60;
-    int seconds = static_cast<int>(estimatedTimeRemaining) % 60;
+    // 更新导航时间
+    int totalSeconds = static_cast<int>(navigationTime);
+    int minutes = totalSeconds / 60;
+    int seconds = totalSeconds % 60;
     QString timeStr = QString("%1:%2")
         .arg(minutes, 2, 10, QChar('0'))
         .arg(seconds, 2, 10, QChar('0'));
-    ui->labelEstimatedTime->setText(timeStr);
+    ui->labelNavigationTime->setText(timeStr);
 
+    // 更新预计剩余时间
+    int estSeconds = static_cast<int>(estimatedTimeRemaining);
+    int estMinutes = estSeconds / 60;
+    int estSec = estSeconds % 60;
+    QString estTimeStr = QString("%1:%2")
+        .arg(estMinutes, 2, 10, QChar('0'))
+        .arg(estSec, 2, 10, QChar('0'));
+    ui->labelEstimatedTime->setText(estTimeStr);
+
+    // 更新恢复次数
+    ui->labelRecoveries->setText(QString::number(recoveries));
+
+    // 更新导航进度
+    if (m_initialDistance <= 0.0 && distanceRemaining > 0.0) {
+        m_initialDistance = distanceRemaining;
+        qInfo() << "[MainWindow] 使用第一次反馈距离作为初始距离:" << m_initialDistance;
+    }
+
+    if (m_initialDistance > 0.0 && distanceRemaining >= 0.0) {
+        double progress = ((m_initialDistance - distanceRemaining) / m_initialDistance) * 100.0;
+        progress = std::max(0.0, std::min(100.0, progress));
+        ui->navigationProgressBar->setValue(static_cast<int>(progress));
+        qDebug() << "[MainWindow] 导航进度:" << progress << "%, 剩余距离:" << distanceRemaining;
+    }
+
+    // 日志记录
     QString message = QString("导航反馈 - 剩余距离: %1m, 导航时间: %2s, 恢复次数: %3, 预计剩余: %4")
         .arg(distanceRemaining, 0, 'f', 2)
         .arg(navigationTime, 0, 'f', 1)
         .arg(recoveries)
-        .arg(timeStr);
+        .arg(estTimeStr);
     LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation", "Feedback");
     addLogEntry(entry);
 }
@@ -810,7 +902,7 @@ void MainWindow::onNavigationResult(bool success, const QString& message)
 
 void MainWindow::onGoalAccepted()
 {
-    ui->labelNavigationStatus->setText("导航中...");
+    ui->labelNavigationStatus->setText("导航中");
     ui->labelNavigationStatus->setStyleSheet("color: blue;");
 
     // 重置初始距离，将在第一次反馈时设置
@@ -1292,6 +1384,11 @@ void MainWindow::updateParameterValue(const QString& key, const QVariant& value)
 
 void MainWindow::addLogEntry(const LogEntry& entry)
 {
+    // 如果暂停接收日志，直接返回
+    if (m_logPaused) {
+        return;
+    }
+
     m_allLogs.append(entry);
 
     if (m_allLogs.size() > MAX_ALL_LOGS_SIZE) {

@@ -1,4 +1,5 @@
 #include "logfilterproxymodel.h"
+#include "logtablemodel.h"
 
 LogFilterProxyModel::LogFilterProxyModel(QObject* parent)
     : QSortFilterProxyModel(parent)
@@ -111,11 +112,13 @@ bool LogFilterProxyModel::filterAcceptsRow(int sourceRow, const QModelIndex& sou
     QModelIndex messageIndex = sourceModel()->index(sourceRow, 3, sourceParent);
     QModelIndex timestampIndex = sourceModel()->index(sourceRow, 0, sourceParent);
 
-    int level = sourceModel()->data(levelIndex, Qt::DisplayRole).toInt();
+    // 使用 LevelRole 获取整数类型的日志级别，而不是 DisplayRole（字符串）
+    int level = sourceModel()->data(levelIndex, LogTableModel::LevelRole).toInt();
     QString source = sourceModel()->data(sourceIndex, Qt::DisplayRole).toString();
     QString message = sourceModel()->data(messageIndex, Qt::DisplayRole).toString();
     QDateTime timestamp = sourceModel()->data(timestampIndex, Qt::DisplayRole).toDateTime();
 
+    // 日志级别过滤：勾选哪个显示哪个，都没勾选则显示全部
     if (!m_logLevelFilter.isEmpty() && !m_logLevelFilter.contains(level)) {
         return false;
     }

@@ -44,9 +44,9 @@ QVariant LogTableModel::data(const QModelIndex& index, int role) const
         return QVariant();
     }
 
-    if (role == Qt::DisplayRole) {
-        const LogEntry& entry = m_logs[index.row()];
+    const LogEntry& entry = m_logs[index.row()];
 
+    if (role == Qt::DisplayRole) {
         switch (index.column()) {
         case 0:
             return entry.timestamp.toString("yyyy-MM-dd hh:mm:ss.zzz");
@@ -59,6 +59,11 @@ QVariant LogTableModel::data(const QModelIndex& index, int role) const
         default:
             return QVariant();
         }
+    }
+
+    // 自定义角色：返回整数类型的日志级别（用于过滤）
+    if (role == LevelRole && index.column() == 1) {
+        return static_cast<int>(entry.level);
     }
 
     if (role == Qt::TextAlignmentRole) {

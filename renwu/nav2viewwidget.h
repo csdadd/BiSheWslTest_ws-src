@@ -31,6 +31,10 @@ public:
     void publishCurrentGoal();
     void clearGoal();
 
+    // 获取当前机器人位置（地图坐标系）
+    double getRobotX() const { QReadLocker locker(&data_lock_); return robot_x_; }
+    double getRobotY() const { QReadLocker locker(&data_lock_); return robot_y_; }
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -77,6 +81,7 @@ private:
     double goal_y_;
     double goal_yaw_;
     bool goal_pose_received_;
+    bool goal_cleared_manually_ = false;  // 标记目标是否被手动清除
 
     mutable QReadWriteLock data_lock_;  // 保护ROS回调数据的读写锁
 

@@ -2,6 +2,7 @@
 #define NAVIGATIONACTIONCLIENT_H
 
 #include <QObject>
+#include <QTimer>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <nav2_msgs/action/navigate_to_pose.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -40,13 +41,22 @@ private:
     void resultCallback(const rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>::WrappedResult& result);
 
 private:
+    void startSpin();
+    void stopSpin();
+
+private:
     rclcpp::Node::SharedPtr m_node;
     rclcpp_action::Client<nav2_msgs::action::NavigateToPose>::SharedPtr m_actionClient;
     std::shared_ptr<rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>> m_goalHandle;
     geometry_msgs::msg::PoseStamped m_currentGoal;
     std::atomic<bool> m_isNavigating;
     mutable QMutex m_mutex;
+    QTimer* m_spinTimer = nullptr;
     static constexpr int CANCEL_TIMEOUT_MS = 3000;
+    static constexpr int SPIN_PERIOD_MS = 50;
+
+    // 保存 goal_future 以防止 goal 被自动取消
+    std::shared_future<rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateToPose>::SharedPtr> m_goalFuture;
 };
 
 #endif

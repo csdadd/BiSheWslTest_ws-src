@@ -28,6 +28,7 @@ Nav2ViewWidget::Nav2ViewWidget(const std::string& map_yaml_path,
     , goal_y_(0.0)
     , goal_yaw_(0.0)
     , goal_pose_received_(false)
+    , goal_cleared_manually_(false)
     , mouse_dragging_(false)
     , coord_transformer_(0.05, 0.0, 0.0, 0)
 {
@@ -150,6 +151,11 @@ void Nav2ViewWidget::amclPoseCallback(const geometry_msgs::msg::PoseWithCovarian
 }
 
 void Nav2ViewWidget::goalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
+    // 如果用户手动清除了目标，忽略来自话题的更新
+    if (goal_cleared_manually_) {
+        return;
+    }
+
     {
         QWriteLocker locker(&data_lock_);
         goal_x_ = msg->pose.position.x;
@@ -164,8 +170,22 @@ void Nav2ViewWidget::localPlanCallback(const nav_msgs::msg::Path::SharedPtr msg)
     {
         QWriteLocker locker(&data_lock_);
         local_path_points_.clear();
+
+        std::string frame_id = msg->header.frame_id;
+
         for (const auto& pose_stamped : msg->poses) {
-            QPointF pt = coord_transformer_.mapToQt(pose_stamped.pose.position.x, pose_stamped.pose.position.y);
+            double x = pose_stamped.pose.position.x;
+            double y = pose_stamped.pose.position.y;
+
+            // odom 坐标系需要转换为 map 坐标系
+            // 简化处理：假设 odom 原点是机器人起始位置，使用当前机器人位置作为偏移
+            if (frame_id.find("odom") != std::string::npos) {
+                x += robot_x_;
+                y += robot_y_;
+            }
+            // 如果已经是 map 坐标系，直接使用原始坐标
+
+            QPointF pt = coord_transformer_.mapToQt(x, y);
             local_path_points_.push_back(pt);
         }
     } // 锁在此处释放
@@ -176,12 +196,30 @@ void Nav2ViewWidget::scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr m
     {
         QWriteLocker locker(&data_lock_);
         scan_points_.clear();
+
+        std::string frame_id = msg->header.frame_id;
+        static int scanCount = 0;
+        scanCount++;
+        if (scanCount % 10 == 0) {
+            qDebug() << "[Nav2ViewWidget] 激光坐标系:" << QString::fromStdString(frame_id)
+                     << "机器人位置:" << robot_x_ << robot_y_ << "航向:" << robot_yaw_;
+        }
+
         float angle = msg->angle_min;
         for (const auto& range : msg->ranges) {
-            if (range >= msg->range_min && range <= msg->range_max) {
-                float x = range * std::cos(angle);
-                float y = range * std::sin(angle);
-                QPointF pt = coord_transformer_.mapToQt(x, y);
+            if (range >= msg->range_min && range <= msg->range_max &&
+                std::isfinite(range)) {
+
+                // 激光坐标系下的坐标（相对于激光雷达）
+                float laser_x = range * std::cos(angle);
+                float laser_y = range * std::sin(angle);
+
+                // 转换为地图坐标系：激光 -> 机器人 -> 地图
+                // 假设激光雷达与机器人中心重合（或偏移很小）
+                double map_x = robot_x_ + laser_x * std::cos(robot_yaw_) - laser_y * std::sin(robot_yaw_);
+                double map_y = robot_y_ + laser_x * std::sin(robot_yaw_) + laser_y * std::cos(robot_yaw_);
+
+                QPointF pt = coord_transformer_.mapToQt(map_x, map_y);
                 scan_points_.push_back(pt);
             }
             angle += msg->angle_increment;
@@ -247,8 +285,9 @@ void Nav2ViewWidget::paintEvent(QPaintEvent* event) {
     if (robot_pose_received_) {
         QPointF center = coord_transformer_.mapToQt(robot_x_, robot_y_);
         center = center * vt.scale + QPointF(vt.offset_x, vt.offset_y);
-        double pixel_length = robot_length_ / map_resolution_ * vt.scale;
-        double pixel_width = robot_width_ / map_resolution_ * vt.scale;
+        // 使用固定像素尺寸显示机器人，避免在高分辨率地图下显示过小
+        double pixel_length = 30.0;  // 固定显示尺寸为30像素
+        double pixel_width = 24.0;   // 根据长宽比调整
 
         QTransform transform;
         transform.translate(center.x(), center.y());
@@ -261,7 +300,8 @@ void Nav2ViewWidget::paintEvent(QPaintEvent* event) {
         painter.drawPolygon(robot_rect);
 
         QPolygonF triangle;
-        double arrow_size = pixel_length / 3;
+        // 使用固定箭头尺寸，避免在高分辨率地图下显示过小
+        double arrow_size = 10.0;  // 固定箭头尺寸为10像素
         triangle << QPointF(pixel_length / 2, 0)
                  << QPointF(pixel_length / 2 - arrow_size, -arrow_size / 2)
                  << QPointF(pixel_length / 2 - arrow_size, arrow_size / 2);
@@ -272,7 +312,8 @@ void Nav2ViewWidget::paintEvent(QPaintEvent* event) {
     if (goal_pose_received_) {
         QPointF center = coord_transformer_.mapToQt(goal_x_, goal_y_);
         center = center * vt.scale + QPointF(vt.offset_x, vt.offset_y);
-        double arrow_size = 20.0 * vt.scale;
+        // 使用固定箭头尺寸，避免在高分辨率地图下显示过小
+        double arrow_size = 25.0;  // 固定目标箭头尺寸为25像素
 
         QTransform transform;
         transform.translate(center.x(), center.y());
@@ -294,7 +335,8 @@ void Nav2ViewWidget::paintEvent(QPaintEvent* event) {
             mouse_press_pos_.y() - mouse_current_pos_.y(),
             mouse_current_pos_.x() - mouse_press_pos_.x()
         );
-        double arrow_size = 20.0 * vt.scale;
+        // 使用固定箭头尺寸，与目标箭头保持一致
+        double arrow_size = 25.0;  // 固定拖拽预览箭头尺寸为25像素
 
         QTransform transform;
         transform.translate(mouse_press_pos_.x(), mouse_press_pos_.y());
@@ -369,6 +411,9 @@ void Nav2ViewWidget::publishCurrentGoal()
         return;
     }
 
+    // 发布新目标时，清除手动清除标志，允许接收话题更新
+    goal_cleared_manually_ = false;
+
     geometry_msgs::msg::PoseStamped goal_msg;
     goal_msg.header.stamp = node_->now();
     goal_msg.header.frame_id = "map";
@@ -388,4 +433,5 @@ void Nav2ViewWidget::clearGoal()
     goal_y_ = 0.0;
     goal_yaw_ = 0.0;
     goal_pose_received_ = false;
+    goal_cleared_manually_ = true;  // 标记已手动清除，忽略后续话题更新
 }

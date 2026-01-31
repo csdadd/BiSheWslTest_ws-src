@@ -75,6 +75,8 @@ private slots:
 
     // 日志过滤槽函数
     void onFilterChanged();
+    void onClearLogByLevel();
+    void onPauseLogToggled(bool checked);
 
     // 地图相关槽函数
     void onMapClicked(double x, double y);
@@ -136,9 +138,14 @@ private:
     std::unique_ptr<LogFilterProxyModel> m_logFilterProxyModel;
     QList<LogEntry> m_allLogs;
     static constexpr int MAX_ALL_LOGS_SIZE = 10000;
+    bool m_logPaused = false;  // 日志接收暂停标志
     std::unique_ptr<Nav2ViewWidget> m_nav2ViewWidget;
     // std::unique_ptr<MapWidget> m_mapWidget;  // 保留备份
     std::unique_ptr<MapCache> m_mapCache;
+
+    // Nav2ViewWidget 的 ROS2 node 和 spin 定时器
+    rclcpp::Node::SharedPtr m_nav2ViewNode;
+    QTimer* m_rosSpinTimer = nullptr;
     std::unique_ptr<NavigationActionClient> m_navigationClient;
     std::unique_ptr<PathVisualizer> m_pathVisualizer;
     double m_targetX;

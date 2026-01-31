@@ -7,6 +7,7 @@
 NavigationActionClient::NavigationActionClient(QObject* parent)
     : QObject(parent)
     , m_isNavigating(false)
+    , m_spinTimer(new QTimer(this))
 {
     ROSContextManager::instance().initialize();
     m_node = std::make_shared<rclcpp::Node>("navigation_action_client_node");
@@ -14,11 +15,25 @@ NavigationActionClient::NavigationActionClient(QObject* parent)
         m_node,
         "/navigate_to_pose"
     );
+
+    // 启动定时器 spin node，确保 ActionClient 回调被处理
+    connect(m_spinTimer, &QTimer::timeout, this, [this]() {
+        if (m_node) {
+            rclcpp::spin_some(m_node);
+        }
+    });
+    m_spinTimer->start(SPIN_PERIOD_MS);
+
     qDebug() << "[NavigationActionClient] 导航动作客户端初始化完成";
 }
 
 NavigationActionClient::~NavigationActionClient()
 {
+    // 停止定时器
+    if (m_spinTimer) {
+        m_spinTimer->stop();
+    }
+
     QMutexLocker locker(&m_mutex);
 
     if (m_isNavigating.load() && m_goalHandle) {
@@ -32,6 +47,8 @@ NavigationActionClient::~NavigationActionClient()
 
 bool NavigationActionClient::sendGoal(double x, double y, double yaw)
 {
+    qInfo() << "[NavigationActionClient] 发送导航目标:" << x << "," << y << "," << yaw;
+
     if (!m_actionClient->wait_for_action_server(std::chrono::seconds(5))) {
         qCritical() << "[NavigationActionClient] 导航服务器不可用";
         emit goalRejected("Action server not available");
@@ -62,6 +79,8 @@ bool NavigationActionClient::sendGoal(double x, double y, double yaw)
         std::bind(&NavigationActionClient::resultCallback, this, std::placeholders::_1);
 
     auto goal_future = m_actionClient->async_send_goal(goal_msg, goal_options);
+    // 保存 future 以防止 goal 被自动取消
+    m_goalFuture = goal_future;
     return true;
 }
 
@@ -69,12 +88,13 @@ bool NavigationActionClient::cancelGoal()
 {
     QMutexLocker locker(&m_mutex);
 
-    if (!m_isNavigating.load() || !m_goalHandle) {
-        qWarning() << "[NavigationActionClient] 尝试取消目标，但当前没有活动导航";
+    // 只要有 goalHandle 就尝试取消，不依赖 m_isNavigating 状态
+    if (!m_goalHandle) {
+        qWarning() << "[NavigationActionClient] 尝试取消目标，但没有可用的目标句柄";
         return false;
     }
 
-    qDebug() << "[NavigationActionClient] 正在取消导航目标";
+    qInfo() << "[NavigationActionClient] 正在取消导航目标...";
     auto cancel_future = m_actionClient->async_cancel_goal(m_goalHandle);
     // 使用超时等待，避免无限阻塞 (P0-010修复)
     auto status = cancel_future.wait_for(std::chrono::milliseconds(CANCEL_TIMEOUT_MS));
@@ -109,9 +129,9 @@ void NavigationActionClient::goalResponseCallback(std::shared_ptr<rclcpp_action:
         return;
     }
 
+    qInfo() << "[NavigationActionClient] 目标已接受";
     m_goalHandle = goalHandle;
     m_isNavigating.store(true);
-    qDebug() << "[NavigationActionClient] 导航目标已被接受";
     emit goalAccepted();
 }
 
@@ -123,7 +143,14 @@ void NavigationActionClient::feedbackCallback(std::shared_ptr<rclcpp_action::Cli
     int recoveries = feedback->number_of_recoveries;
     double estimatedTimeRemaining = feedback->estimated_time_remaining.sec + feedback->estimated_time_remaining.nanosec / 1e9;
 
-    qDebug() << "[NavigationActionClient] 导航反馈 - 剩余距离:" << distanceRemaining << "m, 已用时间:" << navigationTime << "s, 恢复次数:" << recoveries << "预计剩余时间:" << estimatedTimeRemaining << "s";
+    // 添加调试日志，确认回调被调用
+    static int feedbackCount = 0;
+    feedbackCount++;
+    // 每次反馈都输出，确保能看到回调被调用
+    qDebug() << "[NavigationActionClient] Feedback #" << feedbackCount
+             << "剩余距离:" << distanceRemaining
+             << "导航时间:" << navigationTime
+             << "恢复次数:" << recoveries;
 
     emit feedbackReceived(distanceRemaining, navigationTime, recoveries, estimatedTimeRemaining);
 }
