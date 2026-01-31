@@ -237,8 +237,10 @@ void MapWidget::mousePressEvent(QMouseEvent* event)
         setDragMode(QGraphicsView::ScrollHandDrag);
     } else if (event->button() == Qt::RightButton) {
         QPointF scenePos = mapToScene(event->pos());
+        // 将场景坐标转换为图像坐标（考虑缩放因子）
+        QPointF imagePos(scenePos.x() / m_zoomLevel, scenePos.y() / m_zoomLevel);
         QPointF mapPos = MapConverter::imageToMap(
-            scenePos.x(), scenePos.y(), m_resolution, m_originX, m_originY);
+            imagePos.x(), imagePos.y(), m_resolution, m_originX, m_originY);
         emit mapClicked(mapPos.x(), mapPos.y());
     }
 
