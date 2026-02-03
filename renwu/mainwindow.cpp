@@ -87,7 +87,8 @@ bool MainWindow::initialize()
 
     m_mapCache = std::make_unique<MapCache>(10, this);
 
-    m_navigationClient = std::make_unique<NavigationActionClient>(this);
+    // m_navigationClient = std::make_unique<NavigationActionClient>(this);
+    m_navigationActionThread = std::make_unique<NavigationActionThread>(this);
     m_pathVisualizer = nullptr;  // Nav2ViewWidget 内部处理路径显示
 
     QTimer* currentTimeTimer = new QTimer(this);
@@ -259,17 +260,29 @@ void MainWindow::connectSignals()
     connect(ui->actionChangePassword, &QAction::triggered, this, &MainWindow::onChangePassword);
     connect(ui->actionLogout, &QAction::triggered, this, &MainWindow::onLogout);
 
-    // NavigationActionClient信号连接
-    connect(m_navigationClient.get(), &NavigationActionClient::goalAccepted,
+    // NavigationActionThread 信号连接（替换原来的 NavigationActionClient）
+    connect(m_navigationActionThread.get(), &NavigationActionThread::goalAccepted,
             this, &MainWindow::onGoalAccepted);
-    connect(m_navigationClient.get(), &NavigationActionClient::goalRejected,
+    connect(m_navigationActionThread.get(), &NavigationActionThread::goalRejected,
             this, &MainWindow::onGoalRejected);
-    connect(m_navigationClient.get(), &NavigationActionClient::feedbackReceived,
+    connect(m_navigationActionThread.get(), &NavigationActionThread::feedbackReceived,
             this, &MainWindow::onNavigationFeedback);
-    connect(m_navigationClient.get(), &NavigationActionClient::resultReceived,
+    connect(m_navigationActionThread.get(), &NavigationActionThread::resultReceived,
             this, &MainWindow::onNavigationResult);
-    connect(m_navigationClient.get(), &NavigationActionClient::goalCanceled,
+    connect(m_navigationActionThread.get(), &NavigationActionThread::goalCanceled,
             this, &MainWindow::onGoalCanceled);
+
+    // NavigationActionThread 线程状态信号
+    connect(m_navigationActionThread.get(), &NavigationActionThread::threadStarted,
+            this, &MainWindow::onThreadStarted);
+    connect(m_navigationActionThread.get(), &NavigationActionThread::threadStopped,
+            this, &MainWindow::onThreadStopped);
+    connect(m_navigationActionThread.get(), &NavigationActionThread::threadError,
+            this, &MainWindow::onThreadError);
+
+    // NavigationActionThread 日志转发
+    connect(m_navigationActionThread.get(), &NavigationActionThread::logMessage,
+            m_logThread.get(), &LogThread::writeLog);
 
     // Nav2ViewWidget信号连接
     connect(m_nav2ViewWidget.get(), &Nav2ViewWidget::goalPosePreview,
@@ -360,6 +373,13 @@ void MainWindow::startAllThreads()
         });
     }, Qt::UniqueConnection);
 
+    // 在 Nav2ParameterThread 启动后启动 NavigationActionThread
+    connect(m_paramThread.get(), &Nav2ParameterThread::threadStarted, this, [this]() {
+        QTimer::singleShot(THREAD_START_DELAY_MS, m_navigationActionThread.get(), [this]() {
+            m_navigationActionThread->start();
+        });
+    }, Qt::UniqueConnection);
+
     // 启动第一个线程
     m_logThread->start();
 }
@@ -368,6 +388,15 @@ void MainWindow::stopAllThreads()
 {
     // 停止顺序与启动相反
     // 使用智能指针的bool转换操作符检查有效性
+
+    // 先停止 NavigationActionThread
+    if (m_navigationActionThread && m_navigationActionThread->isRunning()) {
+        m_navigationActionThread->stopThread();
+        if (!m_navigationActionThread->wait(THREAD_STOP_TIMEOUT_MS)) {
+            qWarning() << "[MainWindow] 警告：导航动作线程停止超时";
+        }
+    }
+
     if (m_paramThread && m_paramThread->isRunning()) {
         m_paramThread->stopThread();
         if (!m_paramThread->wait(THREAD_STOP_TIMEOUT_MS)) {
@@ -748,29 +777,21 @@ void MainWindow::onStartNavigation()
         return;
     }
 
-    if (!m_navigationClient) {
-        qCritical() << "[MainWindow] 错误：NavigationActionClient 未初始化";
-        QMessageBox::critical(this, tr("错误"), tr("导航客户端未初始化"));
+    if (!m_navigationActionThread) {
+        qCritical() << "[MainWindow] 错误：NavigationActionThread 未初始化";
+        QMessageBox::critical(this, tr("错误"), tr("导航动作线程未初始化"));
         return;
     }
+
+    // 重置初始距离，将在第一次反馈时使用 Nav2 返回的距离设置
+    m_initialDistance = 0.0;
+    qInfo() << "[MainWindow] 重置初始距离，等待第一次反馈";
 
     // 调用 Nav2ViewWidget 发布目标到 /goal_pose 话题
     m_nav2ViewWidget->publishCurrentGoal();
 
-    // 计算初始距离（直线距离）用于进度计算
-    if (m_nav2ViewWidget) {
-        double currentX = m_nav2ViewWidget->getRobotX();
-        double currentY = m_nav2ViewWidget->getRobotY();
-        double dx = m_targetX - currentX;
-        double dy = m_targetY - currentY;
-        m_initialDistance = std::sqrt(dx * dx + dy * dy);
-        qInfo() << "[MainWindow] 初始距离设置为:" << m_initialDistance << "米";
-    } else {
-        m_initialDistance = 0.0;
-    }
-
-    // 通过 ActionClient 发送导航目标
-    m_navigationClient->sendGoal(m_targetX, m_targetY, m_targetYaw);
+    // 通过 NavigationActionThread 发送导航目标
+    m_navigationActionThread->sendGoalToPose(m_targetX, m_targetY, m_targetYaw);
 
     ui->labelNavigationStatus->setText(tr("导航中"));
     ui->labelNavigationStatus->setStyleSheet("color: blue;");
@@ -778,15 +799,15 @@ void MainWindow::onStartNavigation()
 
 void MainWindow::onCancelNavigation()
 {
-    if (!m_navigationClient) {
-        qCritical() << "[MainWindow] 错误：NavigationActionClient 未初始化";
-        QMessageBox::critical(this, tr("错误"), tr("导航客户端未初始化"));
+    if (!m_navigationActionThread) {
+        qCritical() << "[MainWindow] 错误：NavigationActionThread 未初始化";
+        QMessageBox::critical(this, tr("错误"), tr("导航动作线程未初始化"));
         return;
     }
 
     // 移除 isNavigating() 检查，直接尝试取消
     // 原因：客户端状态可能与服务端不同步
-    bool success = m_navigationClient->cancelGoal();
+    bool success = m_navigationActionThread->cancelCurrentGoal();
     if (!success) {
         QMessageBox::information(this, tr("提示"), tr("无导航任务或取消失败"));
         return;
@@ -850,16 +871,26 @@ void MainWindow::onNavigationFeedback(double distanceRemaining, double navigatio
     ui->labelRecoveries->setText(QString::number(recoveries));
 
     // 更新导航进度
-    if (m_initialDistance <= 0.0 && distanceRemaining > 0.0) {
+    // 设置初始距离：需要距离大于最小阈值（避免使用上一个任务的旧反馈）
+    const double MIN_INITIAL_DISTANCE = 0.5;  // 最小初始距离阈值（米）
+    if (m_initialDistance <= 0.0 && distanceRemaining > MIN_INITIAL_DISTANCE) {
         m_initialDistance = distanceRemaining;
-        qInfo() << "[MainWindow] 使用第一次反馈距离作为初始距离:" << m_initialDistance;
+        qInfo() << "[MainWindow] 设置初始距离为第一次反馈值:" << m_initialDistance;
+    } else if (m_initialDistance <= 0.0 && distanceRemaining > 0.0) {
+        qDebug() << "[MainWindow] 忽略过小的反馈距离（可能是旧任务反馈）: distanceRemaining=" << distanceRemaining;
+    } else if (m_initialDistance <= 0.0) {
+        qDebug() << "[MainWindow] 跳过设置初始距离: m_initialDistance=" << m_initialDistance << ", distanceRemaining=" << distanceRemaining;
     }
 
     if (m_initialDistance > 0.0 && distanceRemaining >= 0.0) {
+        static int progressLogCount = 0;
+        progressLogCount++;
         double progress = ((m_initialDistance - distanceRemaining) / m_initialDistance) * 100.0;
         progress = std::max(0.0, std::min(100.0, progress));
         ui->navigationProgressBar->setValue(static_cast<int>(progress));
-        qDebug() << "[MainWindow] 导航进度:" << progress << "%, 剩余距离:" << distanceRemaining;
+        if (progressLogCount % 50 == 1) {
+            qDebug() << "[MainWindow] 导航进度:" << progress << "%, 剩余距离:" << distanceRemaining;
+        }
     }
 
     // 日志记录
@@ -875,8 +906,8 @@ void MainWindow::onNavigationFeedback(double distanceRemaining, double navigatio
 void MainWindow::onNavigationResult(bool success, const QString& message)
 {
     // 检查指针有效性
-    if (!m_navigationClient) {
-        qCritical() << "[MainWindow] 错误：NavigationActionClient 未初始化";
+    if (!m_navigationActionThread) {
+        qCritical() << "[MainWindow] 错误：NavigationActionThread 未初始化";
         return;
     }
 
@@ -902,6 +933,7 @@ void MainWindow::onNavigationResult(bool success, const QString& message)
 
 void MainWindow::onGoalAccepted()
 {
+    qInfo() << "[MainWindow] onGoalAccepted 被调用，重置初始距离为 0";
     ui->labelNavigationStatus->setText("导航中");
     ui->labelNavigationStatus->setStyleSheet("color: blue;");
 
@@ -982,7 +1014,7 @@ void MainWindow::onLogout()
         }
 
         // 检查是否有正在进行的导航操作
-        if (m_hasTarget && m_navigationClient && m_navigationClient->isNavigating()) {
+        if (m_hasTarget && m_navigationActionThread && m_navigationActionThread->isNavigating()) {
             QMessageBox::StandardButton reply = QMessageBox::question(
                 this,
                 tr("确认登出"),

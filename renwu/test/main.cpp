@@ -6,6 +6,7 @@
 #include "testsystem.h"
 #include "testmaploader.h"
 #include "testnavigationactionclient.h"
+#include "testnavigationactionthread.h"
 #include "testpathvisualizer.h"
 #include "testnavigationintegration.h"
 #include "testuser.h"
@@ -74,6 +75,11 @@ int main(int argc, char** argv)
     {
         TestNavigationActionClient testNavigationActionClient;
         result |= QTest::qExec(&testNavigationActionClient, argc, argv);
+    }
+
+    {
+        TestNavigationActionThread testNavigationActionThread;
+        result |= QTest::qExec(&testNavigationActionThread, argc, argv);
     }
 
     {

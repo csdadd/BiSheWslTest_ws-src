@@ -37,6 +37,13 @@ protected:
     virtual void process() = 0;
     virtual void cleanup() = 0;
 
+    /**
+     * @brief 子类是否使用阻塞式 spin()
+     * @return true 表示子类在 process() 中调用 spin()，不需要额外 spin 线程
+     * @return false 表示使用默认的 spin_once() 循环模式
+     */
+    virtual bool usesBlockingSpin() const { return false; }
+
 protected:
     std::atomic<bool> m_running;
     std::atomic<bool> m_stopped;

@@ -79,6 +79,8 @@ set(PROJECT_SOURCES
         statusindicator.cpp
         navigationactionclient.h
         navigationactionclient.cpp
+        navigationactionthread.h
+        navigationactionthread.cpp
         pathvisualizer.h
         pathvisualizer.cpp
         nav2viewwidget.h
@@ -161,6 +163,8 @@ if(BUILD_TESTING)
         test/testmaploader.h
         test/testnavigationactionclient.cpp
         test/testnavigationactionclient.h
+        test/testnavigationactionthread.cpp
+        test/testnavigationactionthread.h
         test/testpathvisualizer.cpp
         test/testpathvisualizer.h
         test/testnavigationintegration.cpp
@@ -253,6 +257,8 @@ if(BUILD_TESTING)
         statusindicator.cpp
         navigationactionclient.h
         navigationactionclient.cpp
+        navigationactionthread.h
+        navigationactionthread.cpp
         pathvisualizer.h
         pathvisualizer.cpp
         nav2viewwidget.h

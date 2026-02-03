@@ -17,8 +17,12 @@ NavigationActionClient::NavigationActionClient(QObject* parent)
     );
 
     // 启动定时器 spin node，确保 ActionClient 回调被处理
+    // 使用多次调用确保处理所有待处理的回调，避免遗漏 feedback
     connect(m_spinTimer, &QTimer::timeout, this, [this]() {
-        if (m_node) {
+        if (m_node && rclcpp::ok()) {
+            // 多次调用以处理所有待处理的回调（spin_some 在回调队列非空时会处理回调）
+            rclcpp::spin_some(m_node);
+            rclcpp::spin_some(m_node);
             rclcpp::spin_some(m_node);
         }
     });

@@ -51,17 +51,20 @@ void BaseThread::run()
     try {
         initialize();
 
-        // 使用unique_ptr管理线程生命周期
-        m_spinThread = std::make_unique<std::thread>([this]() {
-            while (rclcpp::ok() && !m_stopped) {
-                if (m_executor) {
-                    // 使用spin_once替代spin，避免阻塞
-                    m_executor->spin_once(std::chrono::milliseconds(SPIN_TIMEOUT_MS));
-                } else {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // 如果子类使用阻塞 spin() 模式，不需要创建额外的 spin 线程
+        if (!usesBlockingSpin()) {
+            // 使用unique_ptr管理线程生命周期
+            m_spinThread = std::make_unique<std::thread>([this]() {
+                while (rclcpp::ok() && !m_stopped) {
+                    if (m_executor) {
+                        // 使用spin_once替代spin，避免阻塞
+                        m_executor->spin_once(std::chrono::milliseconds(SPIN_TIMEOUT_MS));
+                    } else {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
                 }
-            }
-        });
+            });
+        }
 
         while (!m_stopped && !isInterruptionRequested()) {
             process();
@@ -71,9 +74,11 @@ void BaseThread::run()
         // 先停止spin线程
         m_stopped = true;
 
-        // 等待spin线程结束
-        if (m_spinThread && m_spinThread->joinable()) {
-            m_spinThread->join();
+        // 等待spin线程结束（仅当创建了spin线程时）
+        if (!usesBlockingSpin()) {
+            if (m_spinThread && m_spinThread->joinable()) {
+                m_spinThread->join();
+            }
         }
 
         cleanup();

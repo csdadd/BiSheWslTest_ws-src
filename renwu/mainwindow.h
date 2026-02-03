@@ -15,7 +15,8 @@
 #include "mapwidget.h"
 #include "mapcache.h"
 #include "nav2viewwidget.h"
-#include "navigationactionclient.h"
+// #include "navigationactionclient.h"  // 保留备份，不再使用
+#include "navigationactionthread.h"     // 新的线程版本
 #include "pathvisualizer.h"
 #include "userstorageengine.h"
 #include "userauthmanager.h"
@@ -146,7 +147,8 @@ private:
     // Nav2ViewWidget 的 ROS2 node 和 spin 定时器
     rclcpp::Node::SharedPtr m_nav2ViewNode;
     QTimer* m_rosSpinTimer = nullptr;
-    std::unique_ptr<NavigationActionClient> m_navigationClient;
+    // std::unique_ptr<NavigationActionClient> m_navigationClient;  // 保留备份
+    std::unique_ptr<NavigationActionThread> m_navigationActionThread;  // 新的线程版本
     std::unique_ptr<PathVisualizer> m_pathVisualizer;
     double m_targetX;
     double m_targetY;

@@ -89,8 +89,6 @@ void SystemMonitorThread::process()
     MonitorLogEntry entry;
     
     while (m_logQueue.tryDequeue(entry, 0)) {
-        emit logMessageReceived(entry.message, static_cast<int>(entry.level), entry.timestamp);
-        
         StorageLogEntry storageEntry(
             entry.message,
             entry.level,
