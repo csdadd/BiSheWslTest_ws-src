@@ -1,8 +1,10 @@
 #ifndef COORDINATETRANSFORMER_H
 #define COORDINATETRANSFORMER_H
 
-#include <QPointF>
 #include <cmath>
+
+// 前置声明，避免包含 Qt 头文件导致的 #pragma 位置问题
+class QPointF;
 
 /**
  * @brief 坐标转换工具类
@@ -21,6 +23,11 @@
  */
 class CoordinateTransformer {
 public:
+    /**
+     * @brief 默认构造函数（用于 Q_DECLARE_METATYPE）
+     */
+    CoordinateTransformer();
+
     /**
      * @brief 构造函数
      * @param resolution 地图分辨率（米/像素）

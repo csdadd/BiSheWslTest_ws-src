@@ -1,3 +1,9 @@
+#include "coordinatetransformer.h"
+#include <QPointF>
+#include <QMetaType>
+
+Q_DECLARE_METATYPE(CoordinateTransformer)
+
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
 #include <QMessageBox>
@@ -29,6 +35,10 @@ MainWindow::MainWindow(QWidget *parent)
 
 bool MainWindow::initialize()
 {
+    // 注册跨线程信号槽使用的自定义类型
+    qRegisterMetaType<CoordinateTransformer>();
+    qRegisterMetaType<RenderData>();
+
     // 使用智能指针管理资源，自动释放
     m_userStorageEngine = std::make_unique<UserStorageEngine>(this);
     if (!m_userStorageEngine->initialize()) {
@@ -61,27 +71,36 @@ bool MainWindow::initialize()
     // 初始化 ROS2 上下文
     ROSContextManager::instance().initialize();
 
-    // 创建 Nav2ViewWidget，从ROS参数获取地图路径
-    m_nav2ViewNode = std::make_shared<rclcpp::Node>("nav2_view_node");
-    std::string map_path = getMapPathFromRosParam(m_nav2ViewNode).toStdString();
-    m_nav2ViewWidget = std::make_unique<Nav2ViewWidget>(map_path, m_nav2ViewNode, this);
+    // 创建临时节点获取地图路径
+    auto temp_node = std::make_shared<rclcpp::Node>("temp_node");
+    std::string map_path = getMapPathFromRosParam(temp_node).toStdString();
 
-    // 创建定时器定期 spin Nav2ViewWidget 的 node，确保话题回调被处理
-    m_rosSpinTimer = new QTimer(this);
-    connect(m_rosSpinTimer, &QTimer::timeout, this, [this]() {
-        if (m_nav2ViewNode) {
-            rclcpp::spin_some(m_nav2ViewNode);
-        }
-    });
-    m_rosSpinTimer->start(50);  // 每 50ms spin 一次
+    // 创建 DataProcessor（子线程）
+    m_nav2ViewProcessor = std::make_unique<Nav2ViewDataProcessor>(map_path, this);
 
-    // 连接地图加载信号，处理加载失败情况
-    connect(m_nav2ViewWidget.get(), &Nav2ViewWidget::mapLoadFailed,
+    // 创建 Widget（主线程，无 ROS 参数）
+    m_nav2ViewWidget = std::make_unique<Nav2ViewWidget>(this);
+
+    // 连接地图加载信号
+    connect(m_nav2ViewProcessor.get(), &Nav2ViewDataProcessor::mapLoadSucceeded,
+            m_nav2ViewWidget.get(), &Nav2ViewWidget::onMapLoaded);
+    connect(m_nav2ViewProcessor.get(), &Nav2ViewDataProcessor::mapLoadFailed,
             this, [this](const QString& error) {
                 qWarning() << "[MainWindow]" << error;
-                // 地图加载失败时显示警告但不阻塞程序
-                // 用户可以通过界面功能选择其他地图
             });
+
+    // 连接数据信号（跨线程，必须 QueuedConnection）
+    connect(m_nav2ViewProcessor.get(), &Nav2ViewDataProcessor::renderDataReady,
+            m_nav2ViewWidget.get(), &Nav2ViewWidget::onRenderDataReady,
+            Qt::QueuedConnection);
+
+    // 连接清除目标信号
+    connect(m_nav2ViewWidget.get(), &Nav2ViewWidget::goalCleared,
+            m_nav2ViewProcessor.get(), &Nav2ViewDataProcessor::onGoalCleared,
+            Qt::QueuedConnection);
+
+    // 启动 DataProcessor 线程
+    m_nav2ViewProcessor->start();
 
     ui->nav2MapLayout->addWidget(m_nav2ViewWidget.get());
 
@@ -117,9 +136,10 @@ bool MainWindow::initialize()
 
 MainWindow::~MainWindow()
 {
-    // 停止 ROS spin 定时器
-    if (m_rosSpinTimer) {
-        m_rosSpinTimer->stop();
+    // 先停止 DataProcessor 线程
+    if (m_nav2ViewProcessor && m_nav2ViewProcessor->isRunning()) {
+        m_nav2ViewProcessor->stopProcessing();
+        m_nav2ViewProcessor->wait(3000);
     }
 
     stopAllThreads();
@@ -292,6 +312,14 @@ void MainWindow::connectSignals()
                 m_targetYaw = yaw;
                 m_hasTarget = true;
                 ui->labelTargetPosition->setText(QString("(%1, %2)").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2));
+                // 同步更新 processor 的渲染数据，使箭头能正确显示
+                if (m_nav2ViewProcessor) {
+                    QMetaObject::invokeMethod(m_nav2ViewProcessor.get(), "updateGoalPoseOnly",
+                        Qt::QueuedConnection,
+                        Q_ARG(double, x),
+                        Q_ARG(double, y),
+                        Q_ARG(double, yaw));
+                }
             });
 
     // Nav2ParameterThread 信号连接
@@ -748,12 +776,39 @@ void MainWindow::onLoadMapFromFile()
         return;
     }
 
-    // 重置旧的 Nav2ViewWidget
+    // 重置旧的 Nav2ViewWidget 和 DataProcessor
+    if (m_nav2ViewProcessor && m_nav2ViewProcessor->isRunning()) {
+        m_nav2ViewProcessor->stopProcessing();
+        m_nav2ViewProcessor->wait(3000);
+    }
+    m_nav2ViewProcessor.reset();
     m_nav2ViewWidget.reset();
 
-    // 创建新的 Nav2ViewWidget 加载新地图
-    auto node = std::make_shared<rclcpp::Node>("nav2_view_node");
-    m_nav2ViewWidget = std::make_unique<Nav2ViewWidget>(filePath.toStdString(), node, this);
+    // 创建新的 DataProcessor（子线程）
+    m_nav2ViewProcessor = std::make_unique<Nav2ViewDataProcessor>(filePath.toStdString(), this);
+
+    // 创建新的 Widget（主线程）
+    m_nav2ViewWidget = std::make_unique<Nav2ViewWidget>(this);
+
+    // 连接信号
+    connect(m_nav2ViewProcessor.get(), &Nav2ViewDataProcessor::mapLoadSucceeded,
+            m_nav2ViewWidget.get(), &Nav2ViewWidget::onMapLoaded);
+    connect(m_nav2ViewProcessor.get(), &Nav2ViewDataProcessor::mapLoadFailed,
+            this, [this](const QString& error) {
+                qWarning() << "[MainWindow]" << error;
+            });
+
+    connect(m_nav2ViewProcessor.get(), &Nav2ViewDataProcessor::renderDataReady,
+            m_nav2ViewWidget.get(), &Nav2ViewWidget::onRenderDataReady,
+            Qt::QueuedConnection);
+
+    // 连接清除目标信号
+    connect(m_nav2ViewWidget.get(), &Nav2ViewWidget::goalCleared,
+            m_nav2ViewProcessor.get(), &Nav2ViewDataProcessor::onGoalCleared,
+            Qt::QueuedConnection);
+
+    // 启动 DataProcessor 线程
+    m_nav2ViewProcessor->start();
     ui->nav2MapLayout->addWidget(m_nav2ViewWidget.get());
 
     QString message = QString("地图文件加载成功 - 文件: %1").arg(filePath);
@@ -787,10 +842,7 @@ void MainWindow::onStartNavigation()
     m_initialDistance = 0.0;
     qInfo() << "[MainWindow] 重置初始距离，等待第一次反馈";
 
-    // 调用 Nav2ViewWidget 发布目标到 /goal_pose 话题
-    m_nav2ViewWidget->publishCurrentGoal();
-
-    // 通过 NavigationActionThread 发送导航目标
+    // 通过 NavigationActionThread 发送导航目标（使用 Action 而不是话题）
     m_navigationActionThread->sendGoalToPose(m_targetX, m_targetY, m_targetYaw);
 
     ui->labelNavigationStatus->setText(tr("导航中"));
@@ -813,10 +865,7 @@ void MainWindow::onCancelNavigation()
         return;
     }
 
-    if (m_nav2ViewWidget) {
-        m_nav2ViewWidget->clearGoal();
-    }
-
+    // 取消导航时保留目标点显示
     ui->labelNavigationStatus->setText(tr("已取消"));
     ui->labelNavigationStatus->setStyleSheet("color: orange;");
 }

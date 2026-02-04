@@ -64,7 +64,7 @@ void NavStatusThread::process()
 {
     m_processCount++;
     if (m_processCount >= 100) {
-        qDebug() << "[NavStatusThread] 正在运行 - 获取导航状态、反馈和路径信息";
+        // qDebug() << "[NavStatusThread] 正在运行 - 获取导航状态、反馈和路径信息";
         m_processCount = 0;
     }
     if (m_executor && m_rosNode) {

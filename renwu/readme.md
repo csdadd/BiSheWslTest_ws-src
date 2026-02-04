@@ -40,3 +40,20 @@
 
 1. **MapThread + MapWidget** → 订阅实时地图，**已废弃**
 2. **Nav2ViewWidget** → 固定地图图片 + 实时位姿显示，**最终采用**
+
+---
+
+## Debug日志注释说明
+
+以下debug日志输出已被注释（减少控制台噪音）：
+
+| 文件 | 被注释的日志 |
+|------|-------------|
+| `navstatusthread.cpp:67` | `[NavStatusThread] 正在运行 - 获取导航状态、反馈和路径信息` |
+| `robotstatusthread.cpp:94` | `[RobotStatusThread] 正在运行 - 获取电池、位置、里程计和诊断信息` |
+| `systemmonitorthread.cpp:84` | `[SystemMonitorThread] 正在运行 - 监控ROS日志、碰撞检测和行为树` |
+| `logthread.cpp:73` | `[LogThread] 正在运行 - 处理日志队列` |
+
+**注释原因**: 已测试通过，且这些debug日志每100次循环输出一次，产生大量重复信息，影响控制台可读性。
+
+

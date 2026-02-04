@@ -85,6 +85,8 @@ set(PROJECT_SOURCES
         pathvisualizer.cpp
         nav2viewwidget.h
         nav2viewwidget.cpp
+        nav2viewdataprocessor.h
+        nav2viewdataprocessor.cpp
         user.h
         userstorageengine.h
         userstorageengine.cpp
@@ -109,6 +111,7 @@ set(PROJECT_SOURCES
         logutils.h
         coordinatetransformer.h
         coordinatetransformer.cpp
+        renderdata.h
 )
 
 add_executable(renwu
@@ -263,6 +266,8 @@ if(BUILD_TESTING)
         pathvisualizer.cpp
         nav2viewwidget.h
         nav2viewwidget.cpp
+        nav2viewdataprocessor.h
+        nav2viewdataprocessor.cpp
         user.h
         userstorageengine.h
         userstorageengine.cpp

@@ -70,7 +70,7 @@ void LogThread::process()
 {
     m_processCount++;
     if (m_processCount >= 100) {
-        qDebug() << "[LogThread] 正在运行 - 处理日志队列";
+        // qDebug() << "[LogThread] 正在运行 - 处理日志队列";
         m_processCount = 0;
     }
     processLogQueue();

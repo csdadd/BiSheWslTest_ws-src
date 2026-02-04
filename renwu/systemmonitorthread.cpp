@@ -81,7 +81,7 @@ void SystemMonitorThread::process()
 {
     m_processCount++;
     if (m_processCount >= 100) {
-        qDebug() << "[SystemMonitorThread] 正在运行 - 监控ROS日志、碰撞检测和行为树";
+        // qDebug() << "[SystemMonitorThread] 正在运行 - 监控ROS日志、碰撞检测和行为树";
         m_processCount = 0;
     }
 

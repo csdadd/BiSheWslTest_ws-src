@@ -91,7 +91,7 @@ void RobotStatusThread::process()
 {
     m_processCount++;
     if (m_processCount >= 100) {
-        qDebug() << "[RobotStatusThread] 正在运行 - 获取电池、位置、里程计和诊断信息";
+        // qDebug() << "[RobotStatusThread] 正在运行 - 获取电池、位置、里程计和诊断信息";
         m_processCount = 0;
     }
     if (m_executor && m_rosNode) {

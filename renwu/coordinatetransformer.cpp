@@ -1,5 +1,12 @@
 #include "coordinatetransformer.h"
+#include <QPointF>
 #include <QDebug>
+#include <QMetaType>
+
+Q_DECLARE_METATYPE(CoordinateTransformer)
+
+CoordinateTransformer::CoordinateTransformer()
+    : CoordinateTransformer(0.05, 0.0, 0.0, 0) {}
 
 CoordinateTransformer::CoordinateTransformer(double resolution, double originX, double originY, int imageHeight)
     : resolution_(resolution), originX_(originX), originY_(originY), imageHeight_(imageHeight) {
