@@ -63,7 +63,19 @@ Nav2ViewWidget::Nav2ViewWidget(const std::string& map_yaml_path,
     scan_sub_ = node_->create_subscription<sensor_msgs::msg::LaserScan>(
         "/scan", 10, std::bind(&Nav2ViewWidget::scanCallback, this, std::placeholders::_1));
 
-    connect(this, &Nav2ViewWidget::dataUpdated, this, [this]() { this->update(); });
+    // 初始化刷新定时器，限制刷新频率为25Hz（40ms）
+    update_timer_ = new QTimer(this);
+    update_timer_->setInterval(40);
+    connect(update_timer_, &QTimer::timeout, this, [this]() {
+        if (update_pending_.exchange(false)) {
+            this->update();
+        }
+    });
+    update_timer_->start();
+
+    // 初始化 TF2
+    tf_buffer_ = std::make_unique<tf2_ros::Buffer>(node_->get_clock());
+    tf_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf_buffer_);
 }
 
 void Nav2ViewWidget::setRobotSize(double length, double width) {
@@ -135,8 +147,8 @@ void Nav2ViewWidget::planCallback(const nav_msgs::msg::Path::SharedPtr msg) {
             QPointF pt = coord_transformer_.mapToQt(pose_stamped.pose.position.x, pose_stamped.pose.position.y);
             path_points_.push_back(pt);
         }
-    } // 锁在此处释放
-    Q_EMIT dataUpdated();
+    }
+    update_pending_ = true;
 }
 
 void Nav2ViewWidget::amclPoseCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg) {
@@ -146,8 +158,8 @@ void Nav2ViewWidget::amclPoseCallback(const geometry_msgs::msg::PoseWithCovarian
         robot_y_ = msg->pose.pose.position.y;
         robot_yaw_ = GeometryUtils::quaternionToYaw(msg->pose.pose.orientation);
         robot_pose_received_ = true;
-    } // 锁在此处释放
-    Q_EMIT dataUpdated();
+    }
+    update_pending_ = true;
 }
 
 void Nav2ViewWidget::goalPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
@@ -162,8 +174,8 @@ void Nav2ViewWidget::goalPoseCallback(const geometry_msgs::msg::PoseStamped::Sha
         goal_y_ = msg->pose.position.y;
         goal_yaw_ = GeometryUtils::quaternionToYaw(msg->pose.orientation);
         goal_pose_received_ = true;
-    } // 锁在此处释放
-    Q_EMIT dataUpdated();
+    }
+    update_pending_ = true;
 }
 
 void Nav2ViewWidget::localPlanCallback(const nav_msgs::msg::Path::SharedPtr msg) {
@@ -173,23 +185,62 @@ void Nav2ViewWidget::localPlanCallback(const nav_msgs::msg::Path::SharedPtr msg)
 
         std::string frame_id = msg->header.frame_id;
 
-        for (const auto& pose_stamped : msg->poses) {
-            double x = pose_stamped.pose.position.x;
-            double y = pose_stamped.pose.position.y;
-
-            // odom 坐标系需要转换为 map 坐标系
-            // 简化处理：假设 odom 原点是机器人起始位置，使用当前机器人位置作为偏移
-            if (frame_id.find("odom") != std::string::npos) {
-                x += robot_x_;
-                y += robot_y_;
+        // 如果已经是 map 坐标系，直接使用原始坐标
+        if (frame_id.find("map") != std::string::npos) {
+            for (const auto& pose_stamped : msg->poses) {
+                QPointF pt = coord_transformer_.mapToQt(
+                    pose_stamped.pose.position.x,
+                    pose_stamped.pose.position.y);
+                local_path_points_.push_back(pt);
             }
-            // 如果已经是 map 坐标系，直接使用原始坐标
-
-            QPointF pt = coord_transformer_.mapToQt(x, y);
-            local_path_points_.push_back(pt);
         }
-    } // 锁在此处释放
-    Q_EMIT dataUpdated();
+        // odom 或其他坐标系需要使用 TF2 转换为 map 坐标系
+        else {
+            geometry_msgs::msg::TransformStamped transform;
+            bool transform_available = false;
+
+            try {
+                // 查找从路径坐标系到 map 的变换
+                transform = tf_buffer_->lookupTransform(
+                    "map", frame_id, msg->header.stamp, rclcpp::Duration::from_seconds(0.1));
+                transform_available = true;
+            } catch (const tf2::TransformException& ex) {
+                // 如果特定时间戳的变换不可用，尝试最新可用变换
+                try {
+                    transform = tf_buffer_->lookupTransform("map", frame_id, tf2::TimePointZero);
+                    transform_available = true;
+                } catch (const tf2::TransformException& ex2) {
+                    qDebug() << "[Nav2ViewWidget] 无法获取从" << QString::fromStdString(frame_id)
+                             << "到 map 的变换:" << ex2.what();
+                }
+            }
+
+            for (const auto& pose_stamped : msg->poses) {
+                double x = pose_stamped.pose.position.x;
+                double y = pose_stamped.pose.position.y;
+
+                if (transform_available) {
+                    // 使用 TF2 进行正确的坐标变换
+                    geometry_msgs::msg::PoseStamped pose_in, pose_out;
+                    pose_in.pose = pose_stamped.pose;
+                    pose_in.header = pose_stamped.header;
+
+                    tf2::doTransform(pose_in, pose_out, transform);
+                    x = pose_out.pose.position.x;
+                    y = pose_out.pose.position.y;
+                } else {
+                    // 回退方案：使用机器人位置进行近似变换（仅平移）
+                    // 注意：这只在机器人和 odom 原点方向一致时大致正确
+                    x += robot_x_;
+                    y += robot_y_;
+                }
+
+                QPointF pt = coord_transformer_.mapToQt(x, y);
+                local_path_points_.push_back(pt);
+            }
+        }
+    }
+    update_pending_ = true;
 }
 
 void Nav2ViewWidget::scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
@@ -224,8 +275,8 @@ void Nav2ViewWidget::scanCallback(const sensor_msgs::msg::LaserScan::SharedPtr m
             }
             angle += msg->angle_increment;
         }
-    } // 锁在此处释放
-    Q_EMIT dataUpdated();
+    }
+    update_pending_ = true;
 }
 
 void Nav2ViewWidget::paintEvent(QPaintEvent* event) {

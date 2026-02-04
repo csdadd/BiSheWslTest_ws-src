@@ -4,6 +4,8 @@
 #include <QImage>
 #include <QPointF>
 #include <QReadWriteLock>
+#include <QTimer>
+#include <atomic>
 #include <vector>
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
@@ -11,6 +13,9 @@
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include "coordinatetransformer.h"
 
 class Nav2ViewWidget : public QWidget {
@@ -87,6 +92,9 @@ private:
 
     CoordinateTransformer coord_transformer_;  // 坐标转换器
 
+    std::unique_ptr<tf2_ros::Buffer> tf_buffer_;  // TF2缓冲区
+    std::unique_ptr<tf2_ros::TransformListener> tf_listener_;  // TF2监听器
+
     bool mouse_dragging_;
     QPointF mouse_press_pos_;
     QPointF mouse_current_pos_;
@@ -95,4 +103,8 @@ private:
     mutable QImage cached_scaled_map_;
     mutable double cached_scale_ = -1.0;
     mutable QSize cached_widget_size_;
+
+    // 刷新频率控制
+    QTimer* update_timer_ = nullptr;
+    std::atomic<bool> update_pending_{false};
 };

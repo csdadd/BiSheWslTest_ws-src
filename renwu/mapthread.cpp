@@ -42,7 +42,7 @@ void MapThread::initialize()
 
     // 设置父对象为this，确保自动内存管理
     m_updateTimer = new QTimer(this);
-    m_updateTimer->setInterval(250);
+    m_updateTimer->setInterval(40);
     connect(m_updateTimer, &QTimer::timeout, this, &MapThread::emitMapUpdate);
     m_updateTimer->start();
 
