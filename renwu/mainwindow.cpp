@@ -737,6 +737,13 @@ bool MainWindow::shouldDisplayLog(int level) const
 
 void MainWindow::onClearLogByLevel()
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        return;
+    }
+
     // 获取当前勾选的日志级别
     QSet<int> levelsToClear;
     if (ui->debugCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::DEBUG);
@@ -767,6 +774,15 @@ void MainWindow::onClearLogByLevel()
 
 void MainWindow::onPauseLogToggled(bool checked)
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        // 恢复按钮状态
+        ui->pauseLogButton->setChecked(!checked);
+        return;
+    }
+
     m_logPaused = checked;
     if (checked) {
         ui->pauseLogButton->setText("继续接收");
@@ -802,6 +818,13 @@ void MainWindow::onMapClicked(double x, double y)
 
 void MainWindow::onLoadMapFromFile()
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        return;
+    }
+
     QString filePath = QFileDialog::getOpenFileName(
         this,
         "选择地图文件",
@@ -857,6 +880,13 @@ void MainWindow::onLoadMapFromFile()
 
 void MainWindow::onStartNavigation()
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        return;
+    }
+
     if (!m_hasTarget) {
         QMessageBox::warning(this, tr("提示"), tr("请设置导航目标"));
         return;
@@ -888,6 +918,13 @@ void MainWindow::onStartNavigation()
 
 void MainWindow::onCancelNavigation()
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        return;
+    }
+
     if (!m_navigationActionThread) {
         qCritical() << "[MainWindow] 错误：NavigationActionThread 未初始化";
         QMessageBox::critical(this, tr("错误"), tr("导航动作线程未初始化"));
@@ -909,6 +946,13 @@ void MainWindow::onCancelNavigation()
 
 void MainWindow::onClearGoal()
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        return;
+    }
+
     m_hasTarget = false;
     m_targetX = 0.0;
     m_targetY = 0.0;
@@ -1254,6 +1298,42 @@ void MainWindow::updateUIBasedOnPermission()
         ui->btnCancelNavigation->setEnabled(canOperate);
         ui->btnClearGoal->setEnabled(canOperate);
 
+        // 机器人控制按钮
+        ui->btnRobotChassis->setEnabled(canOperate);
+        ui->btnLidar->setEnabled(canOperate);
+        ui->btnNav2->setEnabled(canOperate);
+        ui->btnKeyboardControl->setEnabled(canOperate);
+        ui->btnJoystick->setEnabled(canOperate);
+
+        // 参数控制按钮
+        ui->refreshButton->setEnabled(canOperate);
+        ui->applyButton->setEnabled(canOperate);
+        ui->resetButton->setEnabled(canOperate);
+        ui->discardButton->setEnabled(canOperate);
+
+        // 参数 SpinBox 只读控制（允许查看但禁止编辑）
+        QDoubleSpinBox* paramSpinBoxes[] = {
+            ui->maxVelXSpinBox, ui->minVelXSpinBox, ui->maxVelThetaSpinBox,
+            ui->localInflationRadiusSpinBox, ui->localCostScalingFactorSpinBox,
+            ui->globalInflationRadiusSpinBox, ui->globalCostScalingFactorSpinBox,
+            ui->smootherMaxVelSpinBox, ui->smootherMinVelSpinBox,
+            ui->smootherMaxAccelSpinBox, ui->smootherMaxDecelSpinBox,
+            ui->lookaheadDistSpinBox, ui->robotRadiusSpinBox
+        };
+        for (auto* spinBox : paramSpinBoxes) {
+            spinBox->setReadOnly(!canOperate);
+            spinBox->setStyleSheet(canOperate ? "" : "QDoubleSpinBox { background-color: #f0f0f0; }");
+        }
+
+        // 日志控制按钮
+        ui->clearLogButton->setEnabled(canOperate);
+        ui->pauseLogButton->setEnabled(canOperate);
+
+        // 同步权限到 Nav2ViewWidget
+        if (m_nav2ViewWidget) {
+            m_nav2ViewWidget->setOperatePermission(canOperate);
+        }
+
         QString permissionText;
         switch (permission) {
             case UserPermission::VIEWER:
@@ -1287,6 +1367,13 @@ void MainWindow::updateUIBasedOnPermission()
 
 void MainWindow::onRefreshButtonClicked()
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        return;
+    }
+
     try {
         // 检查指针有效性
         if (!m_paramThread) {
@@ -1309,6 +1396,13 @@ void MainWindow::onRefreshButtonClicked()
 
 void MainWindow::onApplyButtonClicked()
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        return;
+    }
+
     try {
         // 检查指针有效性
         if (!m_paramThread) {
@@ -1341,6 +1435,13 @@ void MainWindow::onApplyButtonClicked()
 
 void MainWindow::onResetButtonClicked()
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        return;
+    }
+
     try {
         // 检查指针有效性
         if (!m_paramThread) {
@@ -1366,6 +1467,13 @@ void MainWindow::onResetButtonClicked()
 
 void MainWindow::onDiscardButtonClicked()
 {
+    // 权限检查
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能执行此操作。"));
+        return;
+    }
+
     try {
         // 检查指针有效性
         if (!m_paramThread) {
@@ -1485,6 +1593,22 @@ void MainWindow::onParameterValueChanged(double value)
     try {
         QDoubleSpinBox* spinBox = qobject_cast<QDoubleSpinBox*>(sender());
         if (!spinBox) return;
+
+        // 权限检查（静默拒绝，不弹窗）
+        if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+            // 恢复为原值
+            QString key = spinBox->objectName();
+            key.replace("SpinBox", "");
+            if (m_paramThread) {
+                Nav2ParameterThread::ParamInfo info;
+                if (m_paramThread->getParamInfo(key, info)) {
+                    spinBox->blockSignals(true);
+                    spinBox->setValue(info.currentValue.toDouble());
+                    spinBox->blockSignals(false);
+                }
+            }
+            return;
+        }
 
         // 检查指针有效性
         if (!m_paramThread) {

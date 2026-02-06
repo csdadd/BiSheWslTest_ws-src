@@ -206,6 +206,11 @@ void Nav2ViewWidget::paintEvent(QPaintEvent* event) {
 }
 
 void Nav2ViewWidget::mousePressEvent(QMouseEvent* event) {
+    // 权限检查
+    if (!m_canOperate) {
+        return;  // VIEWER 权限禁止交互
+    }
+
     if (event->button() == Qt::LeftButton) {
         mouse_dragging_ = true;
         mouse_press_pos_ = event->pos();
@@ -215,6 +220,10 @@ void Nav2ViewWidget::mousePressEvent(QMouseEvent* event) {
 }
 
 void Nav2ViewWidget::mouseMoveEvent(QMouseEvent* event) {
+    if (!m_canOperate) {
+        return;
+    }
+
     if (mouse_dragging_) {
         mouse_current_pos_ = event->pos();
         update();
@@ -222,6 +231,11 @@ void Nav2ViewWidget::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void Nav2ViewWidget::mouseReleaseEvent(QMouseEvent* event) {
+    // 权限检查
+    if (!m_canOperate) {
+        return;  // VIEWER 权限禁止设置目标点
+    }
+
     if (event->button() == Qt::LeftButton && mouse_dragging_) {
         mouse_dragging_ = false;
 
@@ -284,4 +298,10 @@ void Nav2ViewWidget::clearGoal()
     front_buffer_.goal_pose_received = false;
 
     Q_EMIT goalCleared();
+}
+
+void Nav2ViewWidget::setOperatePermission(bool canOperate)
+{
+    m_canOperate = canOperate;
+    qDebug() << "[Nav2ViewWidget] 操作权限已设置为:" << canOperate;
 }

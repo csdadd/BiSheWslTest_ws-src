@@ -36,6 +36,9 @@ public:
     double getRobotX() const;
     double getRobotY() const;
 
+    // 设置操作权限
+    void setOperatePermission(bool canOperate);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
@@ -62,6 +65,9 @@ private:
     bool mouse_dragging_;
     QPointF mouse_press_pos_;
     QPointF mouse_current_pos_;
+
+    // 操作权限标志
+    bool m_canOperate = true;  // 默认允许操作（向后兼容）
 
     // 缓存缩放后的地图图像（用于优化paintEvent性能）
     mutable QImage cached_scaled_map_;
