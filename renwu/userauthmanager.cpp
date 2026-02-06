@@ -1,4 +1,5 @@
 #include "userauthmanager.h"
+#include "userstorageengine.h"
 #include <QDebug>
 
 UserAuthManager::UserAuthManager(QObject* parent)
@@ -53,11 +54,7 @@ bool UserAuthManager::isInitialized() const
 
 QString UserAuthManager::hashPassword(const QString& password)
 {
-    QByteArray hash = QCryptographicHash::hash(
-        password.toUtf8(),
-        QCryptographicHash::Sha256
-    );
-    return hash.toHex();
+    return UserStorageEngine::hashPassword(password);
 }
 
 bool UserAuthManager::verifyPassword(const QString& password, const QString& passwordHash)
@@ -181,7 +178,7 @@ bool UserAuthManager::isLoggedIn() const
 User UserAuthManager::getCurrentUser() const
 {
     QMutexLocker locker(&m_mutex);
-    return m_currentUser;
+    return getCurrentUserImpl();
 }
 
 QString UserAuthManager::getCurrentUsername() const
@@ -199,27 +196,7 @@ UserPermission UserAuthManager::getCurrentPermission() const
 bool UserAuthManager::hasPermission(UserPermission requiredPermission) const
 {
     QMutexLocker locker(&m_mutex);
-    if (!m_loggedIn) {
-        return false;
-    }
-
-    // 显式检查权限级别,不依赖枚举顺序
-    UserPermission currentPermission = m_currentUser.getPermission();
-
-    switch (requiredPermission) {
-        case UserPermission::VIEWER:
-            // 所有用户都有VIEWER权限
-            return true;
-        case UserPermission::OPERATOR:
-            // OPERATOR和ADMIN有此权限
-            return currentPermission == UserPermission::OPERATOR || currentPermission == UserPermission::ADMIN;
-        case UserPermission::ADMIN:
-            // 只有ADMIN有此权限
-            return currentPermission == UserPermission::ADMIN;
-        default:
-            qWarning() << "[UserAuthManager] 警告：无效的权限值";
-            return false;
-    }
+    return hasPermissionImpl(requiredPermission);
 }
 
 bool UserAuthManager::canView() const
@@ -259,7 +236,7 @@ bool UserAuthManager::changePassword(const QString& oldPassword, const QString& 
         return false;
     }
 
-    QString newPasswordHash = hashPassword(newPassword);
+    QString newPasswordHash = UserStorageEngine::hashPassword(newPassword);
 
     if (!m_storageEngine->changePassword(m_currentUser.getId(), newPasswordHash)) {
         m_lastError = m_storageEngine->getLastError();
@@ -276,7 +253,7 @@ bool UserAuthManager::resetPassword(const QString& username, const QString& newP
 {
     QMutexLocker locker(&m_mutex);
 
-    if (!canAdmin()) {
+    if (!hasPermissionImpl(UserPermission::ADMIN)) {
         m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return false;
@@ -294,7 +271,7 @@ bool UserAuthManager::resetPassword(const QString& username, const QString& newP
         return false;
     }
 
-    QString newPasswordHash = hashPassword(newPassword);
+    QString newPasswordHash = UserStorageEngine::hashPassword(newPassword);
 
     if (!m_storageEngine->changePassword(username, newPasswordHash)) {
         m_lastError = m_storageEngine->getLastError();
@@ -310,7 +287,7 @@ bool UserAuthManager::createUser(const QString& username, const QString& passwor
 {
     QMutexLocker locker(&m_mutex);
 
-    if (!canAdmin()) {
+    if (!hasPermissionImpl(UserPermission::ADMIN)) {
         m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return false;
@@ -336,7 +313,7 @@ bool UserAuthManager::createUser(const QString& username, const QString& passwor
 
     User newUser;
     newUser.setUsername(username);
-    newUser.setPasswordHash(hashPassword(password));
+    newUser.setPasswordHash(UserStorageEngine::hashPassword(password));
     newUser.setPermission(permission);
     newUser.setCreatedAt(QDateTime::currentDateTime());
     newUser.setActive(true);
@@ -355,7 +332,7 @@ bool UserAuthManager::deleteUser(const QString& username)
 {
     QMutexLocker locker(&m_mutex);
 
-    if (!canAdmin()) {
+    if (!hasPermissionImpl(UserPermission::ADMIN)) {
         m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return false;
@@ -387,7 +364,7 @@ bool UserAuthManager::updateUserPermission(const QString& username, UserPermissi
 {
     QMutexLocker locker(&m_mutex);
 
-    if (!canAdmin()) {
+    if (!hasPermissionImpl(UserPermission::ADMIN)) {
         m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return false;
@@ -422,14 +399,14 @@ bool UserAuthManager::updateUserPermission(const QString& username, UserPermissi
 QVector<User> UserAuthManager::getAllUsers()
 {
     QMutexLocker locker(&m_mutex);
-    
+
     if (!m_storageEngine) {
         m_lastError = "存储引擎未初始化";
         emit errorOccurred(m_lastError);
         return QVector<User>();
     }
-    
-    if (!canAdmin()) {
+
+    if (!hasPermissionImpl(UserPermission::ADMIN)) {
         m_lastError = "权限不足";
         emit errorOccurred(m_lastError);
         return QVector<User>();
@@ -440,6 +417,7 @@ QVector<User> UserAuthManager::getAllUsers()
 
 QString UserAuthManager::getLastError() const
 {
+    QMutexLocker locker(&m_mutex);
     return m_lastError;
 }
 
@@ -487,4 +465,31 @@ bool UserAuthManager::validateUsername(const QString& username)
     }
 
     return true;
+}
+
+bool UserAuthManager::hasPermissionImpl(UserPermission requiredPermission) const
+{
+    if (!m_loggedIn) {
+        return false;
+    }
+
+    UserPermission currentPermission = m_currentUser.getPermission();
+
+    switch (requiredPermission) {
+        case UserPermission::VIEWER:
+            return true;
+        case UserPermission::OPERATOR:
+            return currentPermission == UserPermission::OPERATOR ||
+                   currentPermission == UserPermission::ADMIN;
+        case UserPermission::ADMIN:
+            return currentPermission == UserPermission::ADMIN;
+        default:
+            qWarning() << "[UserAuthManager] 警告：无效的权限值";
+            return false;
+    }
+}
+
+User UserAuthManager::getCurrentUserImpl() const
+{
+    return m_currentUser;
 }

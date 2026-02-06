@@ -38,6 +38,7 @@ bool MainWindow::initialize()
     // 注册跨线程信号槽使用的自定义类型
     qRegisterMetaType<CoordinateTransformer>();
     qRegisterMetaType<RenderData>();
+    qRegisterMetaType<User>();
 
     // 使用智能指针管理资源，自动释放
     m_userStorageEngine = std::make_unique<UserStorageEngine>(this);
@@ -129,6 +130,42 @@ bool MainWindow::initialize()
             qWarning() << "[MainWindow] 自动登录失败:" << m_userAuthManager->getLastError();
             // 自动登录失败不阻塞，让用户手动登录
         }
+    }
+
+    // 检查登录状态，未登录则显示登录对话框
+    if (!m_userAuthManager->isLoggedIn()) {
+        qDebug() << "[MainWindow] 用户未登录，显示登录对话框";
+        int maxRetries = 3;
+        int retryCount = 0;
+
+        while (retryCount < maxRetries) {
+            m_loginDialog->exec();
+
+            if (m_userAuthManager->isLoggedIn()) {
+                qDebug() << "[MainWindow] 登录成功:" << m_userAuthManager->getCurrentUsername();
+                break;
+            }
+
+            retryCount++;
+
+            if (retryCount >= maxRetries) {
+                qCritical() << "[MainWindow] 错误：登录失败次数过多";
+                return false;
+            }
+
+            QMessageBox::StandardButton reply = QMessageBox::question(
+                this,
+                tr("登录失败"),
+                tr("登录失败，是否重试？（剩余 %1 次）").arg(maxRetries - retryCount),
+                QMessageBox::Retry | QMessageBox::Cancel
+            );
+
+            if (reply == QMessageBox::Cancel) {
+                return false;
+            }
+        }
+    } else {
+        qDebug() << "[MainWindow] 用户已登录:" << m_userAuthManager->getCurrentUsername();
     }
 
     return true;
@@ -1085,35 +1122,54 @@ void MainWindow::onLogout()
         m_targetY = 0.0;
         m_targetYaw = 0.0;
 
+        // 隐藏主窗口
+        this->hide();
+
         // 重新登录循环，添加最大重试次数限制
         int maxRetries = 3;
         int retryCount = 0;
-        
+
         while (retryCount < maxRetries) {
+            // 解除父子关系，使对话框成为独立窗口
+            m_loginDialog->setParent(nullptr, Qt::Window);
+            // 确保对话框启用
+            m_loginDialog->setEnabled(true);
+
             m_loginDialog->exec();
 
             if (m_userAuthManager->isLoggedIn()) {
+                // 登录成功，恢复父子关系
+                m_loginDialog->setParent(this);
+                m_loginDialog->hide();  // 隐藏对话框
+                // 显示并激活主窗口
+                this->show();
+                this->activateWindow();
+                this->raise();
                 break;
             }
 
             retryCount++;
-            
+
             if (retryCount >= maxRetries) {
                 qCritical() << "[MainWindow] 错误：登录重试次数超过限制，程序将退出";
-                QMessageBox::critical(this, tr("登录失败"), 
+                // 恢复父子关系
+                m_loginDialog->setParent(this);
+                QMessageBox::critical(nullptr, tr("登录失败"),
                     tr("登录失败次数过多，程序将退出"));
                 QApplication::quit();
                 return;
             }
 
             QMessageBox::StandardButton reply = QMessageBox::question(
-                this,
+                nullptr,
                 tr("登录失败"),
                 tr("登录失败，是否重试？（剩余 %1 次）").arg(maxRetries - retryCount),
                 QMessageBox::Retry | QMessageBox::Cancel
             );
 
             if (reply == QMessageBox::Cancel) {
+                // 恢复父子关系
+                m_loginDialog->setParent(this);
                 this->close();
                 return;
             }

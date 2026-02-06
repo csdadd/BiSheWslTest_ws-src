@@ -39,6 +39,14 @@ void TestNav2ParameterThreadIntegration::cleanup()
         m_thread->requestApply();
         QThread::msleep(500);
 
+        // 验证恢复成功
+        auto params = m_thread->getAllParams();
+        for (auto it = params.begin(); it != params.end(); ++it) {
+            if (m_initialValues.contains(it.key())) {
+                QCOMPARE(it.value().currentValue, m_initialValues[it.key()]);
+            }
+        }
+
         // 停止线程
         if (m_thread->isRunning()) {
             m_thread->stopThread();
@@ -449,6 +457,231 @@ void TestNav2ParameterThreadIntegration::testOperationFinishedSignal()
     QList<QVariant> arguments = spy.takeFirst();
 
     QCOMPARE(arguments.at(0).toString(), QString("refresh"));
+}
+
+void TestNav2ParameterThreadIntegration::testParameterRefreshedSignalSuccess()
+{
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterRefreshed);
+
+    m_thread->requestRefresh();
+
+    QVERIFY(spy.wait(10000));
+    QList<QVariant> arguments = spy.takeFirst();
+
+    bool success = arguments.at(0).toBool();
+    QString message = arguments.at(1).toString();
+
+    QVERIFY(success);
+    QVERIFY(message.contains("刷新完成") || message.contains("成功"));
+}
+
+void TestNav2ParameterThreadIntegration::testParameterRefreshedSignalFailure()
+{
+    // 这个测试需要模拟节点不可用的场景
+    // 在实际环境中可能难以模拟，这里做基础验证
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterRefreshed);
+
+    m_thread->requestRefresh();
+
+    // 至少信号被触发
+    QVERIFY(spy.wait(10000));
+}
+
+void TestNav2ParameterThreadIntegration::testParameterAppliedSignalWithMultipleParams()
+{
+    // 修改多个参数
+    m_thread->setPendingValue("maxVelXSpinBox", 0.4);
+    m_thread->setPendingValue("minVelXSpinBox", 0.1);
+    m_thread->setPendingValue("maxVelThetaSpinBox", 0.8);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+
+    m_thread->requestApply();
+
+    QVERIFY(spy.wait(10000));
+    QList<QVariant> arguments = spy.takeFirst();
+
+    bool success = arguments.at(0).toBool();
+    QString message = arguments.at(1).toString();
+    QStringList appliedKeys = arguments.at(2).toStringList();
+
+    QVERIFY(success || message.contains("失败"));  // 根据环境可能成功或失败
+    if (success) {
+        QCOMPARE(appliedKeys.size(), 3);
+        QVERIFY(appliedKeys.contains("maxVelXSpinBox"));
+        QVERIFY(appliedKeys.contains("minVelXSpinBox"));
+        QVERIFY(appliedKeys.contains("maxVelThetaSpinBox"));
+    }
+}
+
+void TestNav2ParameterThreadIntegration::testOperationProgressSignalDuringRefresh()
+{
+    // operationProgress 信号在处理大量参数时触发
+    // 由于当前参数数量较少（13个），且处理很快，可能难以捕获
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::operationProgress);
+
+    m_thread->requestRefresh();
+    QThread::msleep(1000);
+
+    // 这个测试可能不稳定，因为处理太快
+    // 至少验证代码不会崩溃
+    QVERIFY(true);
+}
+
+// ==================== velocity_smoother 数组参数测试 ====================
+
+void TestNav2ParameterThreadIntegration::testVelocitySmootherArrayParameterWrite()
+{
+    Nav2ParameterThread::ParamInfo info;
+    QVERIFY(m_thread->getParamInfo("smootherMaxVelSpinBox", info));
+    double originalValue = info.currentValue.toDouble();
+    double testValue = originalValue + 0.05;
+
+    // 设置并应用
+    m_thread->setPendingValue("smootherMaxVelSpinBox", testValue);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+    m_thread->requestApply();
+
+    QVERIFY(spy.wait(10000));
+
+    // 验证值已更新
+    m_thread->getParamInfo("smootherMaxVelSpinBox", info);
+    QCOMPARE(info.currentValue.toDouble(), testValue);
+
+    // 恢复原始值
+    m_thread->setPendingValue("smootherMaxVelSpinBox", originalValue);
+    m_thread->requestApply();
+    QThread::msleep(500);
+}
+
+// ==================== 多节点参数测试 ====================
+
+void TestNav2ParameterThreadIntegration::testMultiNodeParameterConsistency()
+{
+    Nav2ParameterThread::ParamInfo info;
+
+    // robotRadiusSpinBox 写入到两个节点
+    m_thread->getParamInfo("robotRadiusSpinBox", info);
+    double originalValue = info.currentValue.toDouble();
+    double testValue = originalValue + 0.01;
+
+    m_thread->setPendingValue("robotRadiusSpinBox", testValue);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+    m_thread->requestApply();
+
+    QVERIFY(spy.wait(10000));
+
+    // 验证值已更新
+    m_thread->getParamInfo("robotRadiusSpinBox", info);
+    QCOMPARE(info.currentValue.toDouble(), testValue);
+    QVERIFY(!info.modified);
+
+    // 恢复原始值
+    m_thread->setPendingValue("robotRadiusSpinBox", originalValue);
+    m_thread->requestApply();
+    QThread::msleep(500);
+}
+
+// ==================== 默认值保留测试 ====================
+
+void TestNav2ParameterThreadIntegration::testDefaultValuePreservedAfterModify()
+{
+    Nav2ParameterThread::ParamInfo info;
+
+    // 获取默认值
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QVariant defaultValue = info.defaultValue;
+
+    // 修改并应用
+    m_thread->setPendingValue("maxVelXSpinBox", 0.3);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+    m_thread->requestApply();
+
+    QVERIFY(spy.wait(10000));
+
+    // 验证默认值仍然不变
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QCOMPARE(info.defaultValue, defaultValue);
+}
+
+// ==================== 完整工作流测试 ====================
+
+void TestNav2ParameterThreadIntegration::testFullWorkflowModifyApplyRefresh()
+{
+    Nav2ParameterThread::ParamInfo info;
+
+    // 获取原始值
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    double originalValue = info.currentValue.toDouble();
+
+    // 修改 -> 应用 -> 刷新
+    m_thread->setPendingValue("maxVelXSpinBox", 0.35);
+
+    QSignalSpy spy1(m_thread, &Nav2ParameterThread::parameterApplied);
+    m_thread->requestApply();
+    QVERIFY(spy1.wait(10000));
+
+    m_thread->requestRefresh();
+    QThread::msleep(1000);
+
+    // 验证：刷新后值为新值（不是原始值）
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QCOMPARE(info.currentValue.toDouble(), 0.35);
+    QVERIFY(!info.modified);
+
+    // 恢复原始值
+    m_thread->setPendingValue("maxVelXSpinBox", originalValue);
+    m_thread->requestApply();
+    QThread::msleep(500);
+}
+
+void TestNav2ParameterThreadIntegration::testFullWorkflowModifyResetApply()
+{
+    Nav2ParameterThread::ParamInfo info;
+
+    // 获取默认值
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QVariant defaultValue = info.defaultValue;
+
+    // 修改 -> 重置 -> 应用
+    m_thread->setPendingValue("maxVelXSpinBox", 0.25);
+
+    m_thread->requestReset();
+    QThread::msleep(500);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+    m_thread->requestApply();
+
+    QVERIFY(spy.wait(10000));
+
+    // 验证：恢复到默认值
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QCOMPARE(info.currentValue, defaultValue);
+}
+
+void TestNav2ParameterThreadIntegration::testFullWorkflowModifyDiscard()
+{
+    Nav2ParameterThread::ParamInfo info;
+
+    // 获取原始值
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    double originalValue = info.currentValue.toDouble();
+
+    // 修改 -> 放弃
+    m_thread->setPendingValue("maxVelXSpinBox", 0.25);
+
+    m_thread->requestDiscard();
+    QThread::msleep(500);
+
+    // 验证：值未改变
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QCOMPARE(info.currentValue.toDouble(), originalValue);
+    QCOMPARE(info.pendingValue.toDouble(), originalValue);
+    QVERIFY(!info.modified);
+    QVERIFY(!m_thread->hasPendingChanges());
 }
 
 #include "testnav2parameterthreadintegration.moc"

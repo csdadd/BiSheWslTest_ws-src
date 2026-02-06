@@ -1,5 +1,6 @@
 #include "testnav2viewwidget.h"
 #include "roscontextmanager.h"
+#include "coordinatetransformer.h"
 #include <QTemporaryFile>
 #include <QTextStream>
 #include <yaml-cpp/yaml.h>
@@ -23,33 +24,76 @@ void TestNav2ViewWidget::cleanup()
 {
 }
 
+// 辅助函数：创建测试地图文件
+static bool createTestMapFile(QTemporaryFile& yamlFile, QTemporaryFile& imageFile,
+                               double resolution = 0.05, double originX = -5.0, double originY = -5.0)
+{
+    if (!yamlFile.open()) return false;
+
+    QImage testImage(100, 100, QImage::Format_RGB32);
+    testImage.fill(Qt::white);
+
+    if (!imageFile.open()) return false;
+    if (!testImage.save(imageFile.fileName(), "PNG")) return false;
+
+    QTextStream out(&yamlFile);
+    out << "image: " << imageFile.fileName() << "\n";
+    out << "resolution: " << resolution << "\n";
+    out << "origin: [" << originX << ", " << originY << ", 0.0]\n";
+    out.flush();
+
+    return true;
+}
+
+// 辅助函数：从YAML加载地图数据
+static bool loadMapData(const std::string& yaml_path, QImage& image, CoordinateTransformer& transformer)
+{
+    try {
+        YAML::Node config = YAML::LoadFile(yaml_path);
+
+        if (!config["image"]) {
+            return false;
+        }
+
+        std::string image_name = config["image"].as<std::string>();
+        std::string yaml_dir = yaml_path.substr(0, yaml_path.find_last_of("/\\"));
+        std::string image_path = yaml_dir + "/" + image_name;
+
+        if (!image.load(QString::fromStdString(image_path))) {
+            return false;
+        }
+
+        double resolution = 0.05;
+        double origin_x = 0.0;
+        double origin_y = 0.0;
+
+        if (config["resolution"]) {
+            resolution = config["resolution"].as<double>();
+        }
+
+        if (config["origin"]) {
+            auto origin = config["origin"];
+            if (origin.IsSequence() && origin.size() >= 2) {
+                origin_x = origin[0].as<double>();
+                origin_y = origin[1].as<double>();
+            }
+        }
+
+        transformer = CoordinateTransformer(resolution, origin_x, origin_y, image.height());
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 // =============================================================================
 // 基础功能测试
 // =============================================================================
 
 void TestNav2ViewWidget::testConstruction()
 {
-    // 创建临时测试地图文件
-    QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    // 创建测试图像
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
-    QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
-
-    // 写入 YAML 配置
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
-
-    auto node = std::make_shared<rclcpp::Node>("test_nav_widget");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    // 新API：Nav2ViewWidget只需要QWidget*参数
+    Nav2ViewWidget widget(nullptr);
 
     QVERIFY(widget.width() >= 0);
     QVERIFY(widget.height() >= 0);
@@ -57,50 +101,15 @@ void TestNav2ViewWidget::testConstruction()
 
 void TestNav2ViewWidget::testConstructionWithNullNode()
 {
-    QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
+    // 新API：不需要ROS节点参数
+    Nav2ViewWidget widget(nullptr);
 
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
-    QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
-
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
-
-    // 使用空节点构造，应该不会崩溃
-    rclcpp::Node::SharedPtr nullNode = nullptr;
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), nullNode);
-
-    // 小部件应该存在但可能无法正常工作
     QVERIFY(true);
 }
 
 void TestNav2ViewWidget::testSetRobotSize()
 {
-    QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
-    QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
-
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
-
-    auto node = std::make_shared<rclcpp::Node>("test_robot_size");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
 
     // 设置机器人尺寸（不会崩溃）
     widget.setRobotSize(1.0, 0.8);
@@ -117,30 +126,22 @@ void TestNav2ViewWidget::testSetRobotSize()
 void TestNav2ViewWidget::testLoadValidMap()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(200, 150, QImage::Format_RGB32);
-    testImage.fill(Qt::gray);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-10.0, -10.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_valid_map");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
-    // 小部件应该成功创建
     QVERIFY(true);
 }
 
 void TestNav2ViewWidget::testLoadInvalidMap()
 {
+    // 创建无效的YAML文件
     QTemporaryFile yamlFile;
     QVERIFY(yamlFile.open());
 
@@ -150,9 +151,12 @@ void TestNav2ViewWidget::testLoadInvalidMap()
     out << "origin: [-5.0, -5.0, 0.0]\n";
     out.flush();
 
-    auto node = std::make_shared<rclcpp::Node>("test_invalid_map");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    // 加载应该失败
+    QVERIFY(!loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
+    Nav2ViewWidget widget(nullptr);
     // 即使地图加载失败，小部件也应该存在
     QVERIFY(true);
 }
@@ -167,10 +171,12 @@ void TestNav2ViewWidget::testLoadMapWithMissingImage()
     out << "origin: [-5.0, -5.0, 0.0]\n";
     out.flush();
 
-    auto node = std::make_shared<rclcpp::Node>("test_missing_image");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    // 加载应该失败（缺少image字段）
+    QVERIFY(!loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    // 应该优雅地处理缺失的图像字段
+    Nav2ViewWidget widget(nullptr);
     QVERIFY(true);
 }
 
@@ -181,57 +187,39 @@ void TestNav2ViewWidget::testLoadMapWithMissingImage()
 void TestNav2ViewWidget::testMapToQtConversion()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_map_to_qt");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
-    // 测试坐标转换不会崩溃
-    // 注意：mapToQt 是私有方法，我们通过 paintEvent 间接测试
     QVERIFY(true);
 }
 
 void TestNav2ViewWidget::testQtToMapConversion()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_qt_to_map");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
-    // 通过鼠标事件测试坐标转换
+    // 通过鼠标事件测试
     QMouseEvent pressEvent(QEvent::MouseButtonPress, QPoint(50, 50), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
     QApplication::sendEvent(&widget, &pressEvent);
 
@@ -243,26 +231,16 @@ void TestNav2ViewWidget::testQtToMapConversion()
 
 void TestNav2ViewWidget::testCoordinateConversionRoundtrip()
 {
-    // 测试坐标往返转换的一致性
-    // 通过鼠标交互间接测试
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_roundtrip");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -281,51 +259,46 @@ void TestNav2ViewWidget::testCoordinateConversionRoundtrip()
 }
 
 // =============================================================================
-// ROS回调测试（线程安全）
+// 渲染数据更新测试（替代原来的ROS回调测试）
 // =============================================================================
 
 void TestNav2ViewWidget::testPlanCallbackThreadSafety()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_plan_callback");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
-    // 模拟高频路径更新（多线程测试）
+    // 模拟高频渲染数据更新（多线程测试）
     std::atomic<bool> running{true};
     std::atomic<int> updateCount{0};
 
-    // 线程1：模拟ROS回调写入路径
+    // 线程1：模拟数据处理器写入路径
     std::thread writer([&]() {
-        auto pathPub = node->create_publisher<nav_msgs::msg::Path>("/plan", 10);
         for (int i = 0; i < 100; ++i) {
-            nav_msgs::msg::Path msg;
-            msg.header.stamp = node->now();
-            msg.header.frame_id = "map";
+            RenderData data;
+            data.robot_pose_received = true;
+            data.robot_x = i * 0.01;
+            data.robot_y = i * 0.01;
+
             for (int j = 0; j < 10; ++j) {
-                geometry_msgs::msg::PoseStamped pose;
-                pose.pose.position.x = i * 0.1 + j * 0.01;
-                pose.pose.position.y = i * 0.1 + j * 0.01;
-                msg.poses.push_back(pose);
+                double x = i * 0.1 + j * 0.01;
+                double y = i * 0.1 + j * 0.01;
+                QPointF pt = transformer.mapToQt(x, y);
+                data.path_points.push_back(pt);
             }
-            pathPub->publish(msg);
+
+            QMetaObject::invokeMethod(&widget, "onRenderDataReady", Qt::QueuedConnection,
+                                      Q_ARG(RenderData, data));
             updateCount++;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -350,23 +323,15 @@ void TestNav2ViewWidget::testPlanCallbackThreadSafety()
 void TestNav2ViewWidget::testAmclPoseCallbackThreadSafety()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_amcl_callback");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -376,20 +341,15 @@ void TestNav2ViewWidget::testAmclPoseCallbackThreadSafety()
     std::atomic<int> updateCount{0};
 
     std::thread writer([&]() {
-        auto posePub = node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/amcl_pose", 10);
         for (int i = 0; i < 100; ++i) {
-            geometry_msgs::msg::PoseWithCovarianceStamped msg;
-            msg.header.stamp = node->now();
-            msg.header.frame_id = "map";
-            msg.pose.pose.position.x = std::sin(i * 0.1) * 2.0;
-            msg.pose.pose.position.y = std::cos(i * 0.1) * 2.0;
+            RenderData data;
+            data.robot_pose_received = true;
+            data.robot_x = std::sin(i * 0.1) * 2.0;
+            data.robot_y = std::cos(i * 0.1) * 2.0;
+            data.robot_yaw = i * 0.05;
 
-            // 四元数表示航向角
-            double yaw = i * 0.05;
-            msg.pose.pose.orientation.w = std::cos(yaw * 0.5);
-            msg.pose.pose.orientation.z = std::sin(yaw * 0.5);
-
-            posePub->publish(msg);
+            QMetaObject::invokeMethod(&widget, "onRenderDataReady", Qt::QueuedConnection,
+                                      Q_ARG(RenderData, data));
             updateCount++;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -413,23 +373,15 @@ void TestNav2ViewWidget::testAmclPoseCallbackThreadSafety()
 void TestNav2ViewWidget::testGoalPoseCallbackThreadSafety()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_goal_callback");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -439,19 +391,15 @@ void TestNav2ViewWidget::testGoalPoseCallbackThreadSafety()
     std::atomic<int> updateCount{0};
 
     std::thread writer([&]() {
-        auto goalPub = node->create_publisher<geometry_msgs::msg::PoseStamped>("/goal_pose", 10);
         for (int i = 0; i < 100; ++i) {
-            geometry_msgs::msg::PoseStamped msg;
-            msg.header.stamp = node->now();
-            msg.header.frame_id = "map";
-            msg.pose.position.x = i * 0.1;
-            msg.pose.position.y = i * 0.1;
+            RenderData data;
+            data.goal_pose_received = true;
+            data.goal_x = i * 0.1;
+            data.goal_y = i * 0.1;
+            data.goal_yaw = i * 0.1;
 
-            double yaw = i * 0.1;
-            msg.pose.orientation.w = std::cos(yaw * 0.5);
-            msg.pose.orientation.z = std::sin(yaw * 0.5);
-
-            goalPub->publish(msg);
+            QMetaObject::invokeMethod(&widget, "onRenderDataReady", Qt::QueuedConnection,
+                                      Q_ARG(RenderData, data));
             updateCount++;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
@@ -475,44 +423,32 @@ void TestNav2ViewWidget::testGoalPoseCallbackThreadSafety()
 void TestNav2ViewWidget::testConcurrentCallbacks()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_concurrent");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
-    // 同时触发所有类型的回调
+    // 同时触发所有类型的数据更新
     std::atomic<bool> running{true};
     std::atomic<int> totalUpdates{0};
 
-    auto pathPub = node->create_publisher<nav_msgs::msg::Path>("/plan", 10);
-    auto posePub = node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/amcl_pose", 10);
-    auto goalPub = node->create_publisher<geometry_msgs::msg::PoseStamped>("/goal_pose", 10);
-
     std::thread pathWriter([&]() {
         for (int i = 0; i < 50; ++i) {
-            nav_msgs::msg::Path msg;
-            msg.header.stamp = node->now();
-            geometry_msgs::msg::PoseStamped pose;
-            pose.pose.position.x = i * 0.1;
-            pose.pose.position.y = i * 0.1;
-            msg.poses.push_back(pose);
-            pathPub->publish(msg);
+            RenderData data;
+            for (int j = 0; j < 5; ++j) {
+                QPointF pt = transformer.mapToQt(i * 0.1 + j * 0.02, i * 0.1 + j * 0.02);
+                data.path_points.push_back(pt);
+            }
+            QMetaObject::invokeMethod(&widget, "onRenderDataReady", Qt::QueuedConnection,
+                                      Q_ARG(RenderData, data));
             totalUpdates++;
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
@@ -520,12 +456,13 @@ void TestNav2ViewWidget::testConcurrentCallbacks()
 
     std::thread poseWriter([&]() {
         for (int i = 0; i < 50; ++i) {
-            geometry_msgs::msg::PoseWithCovarianceStamped msg;
-            msg.header.stamp = node->now();
-            msg.pose.pose.position.x = std::sin(i * 0.1);
-            msg.pose.pose.position.y = std::cos(i * 0.1);
-            msg.pose.pose.orientation.w = 1.0;
-            posePub->publish(msg);
+            RenderData data;
+            data.robot_pose_received = true;
+            data.robot_x = std::sin(i * 0.1);
+            data.robot_y = std::cos(i * 0.1);
+            data.robot_yaw = i * 0.05;
+            QMetaObject::invokeMethod(&widget, "onRenderDataReady", Qt::QueuedConnection,
+                                      Q_ARG(RenderData, data));
             totalUpdates++;
             std::this_thread::sleep_for(std::chrono::milliseconds(3));
         }
@@ -533,12 +470,13 @@ void TestNav2ViewWidget::testConcurrentCallbacks()
 
     std::thread goalWriter([&]() {
         for (int i = 0; i < 50; ++i) {
-            geometry_msgs::msg::PoseStamped msg;
-            msg.header.stamp = node->now();
-            msg.pose.position.x = i * 0.05;
-            msg.pose.position.y = i * 0.05;
-            msg.pose.orientation.w = 1.0;
-            goalPub->publish(msg);
+            RenderData data;
+            data.goal_pose_received = true;
+            data.goal_x = i * 0.05;
+            data.goal_y = i * 0.05;
+            data.goal_yaw = i * 0.02;
+            QMetaObject::invokeMethod(&widget, "onRenderDataReady", Qt::QueuedConnection,
+                                      Q_ARG(RenderData, data));
             totalUpdates++;
             std::this_thread::sleep_for(std::chrono::milliseconds(4));
         }
@@ -568,23 +506,15 @@ void TestNav2ViewWidget::testConcurrentCallbacks()
 void TestNav2ViewWidget::testMousePressAndRelease()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_mouse_basic");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -602,23 +532,15 @@ void TestNav2ViewWidget::testMousePressAndRelease()
 void TestNav2ViewWidget::testMouseDrag()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_mouse_drag");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -642,23 +564,15 @@ void TestNav2ViewWidget::testMouseDrag()
 void TestNav2ViewWidget::testMouseReleaseSetsGoal()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_mouse_goal");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -693,23 +607,15 @@ void TestNav2ViewWidget::testMouseReleaseSetsGoal()
 void TestNav2ViewWidget::testPublishCurrentGoal()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_publish_goal");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -723,7 +629,12 @@ void TestNav2ViewWidget::testPublishCurrentGoal()
 
     QApplication::processEvents();
 
-    // 发布目标（不会崩溃）
+    // 发布目标（改为发射信号）
+    bool goalSetReceived = false;
+    QObject::connect(&widget, &Nav2ViewWidget::goalPoseSet, [&]() {
+        goalSetReceived = true;
+    });
+
     widget.publishCurrentGoal();
 
     QVERIFY(true);
@@ -732,23 +643,15 @@ void TestNav2ViewWidget::testPublishCurrentGoal()
 void TestNav2ViewWidget::testPublishGoalWithoutGoal()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_publish_no_goal");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     // 没有设置目标就发布，应该安全处理
     widget.publishCurrentGoal();
@@ -759,23 +662,15 @@ void TestNav2ViewWidget::testPublishGoalWithoutGoal()
 void TestNav2ViewWidget::testClearGoal()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_clear_goal");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -805,38 +700,28 @@ void TestNav2ViewWidget::testClearGoal()
 void TestNav2ViewWidget::testDataUpdatedSignal()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_data_updated");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
     QSignalSpy spy(&widget, &Nav2ViewWidget::dataUpdated);
 
-    // 触发位姿更新
-    auto posePub = node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/amcl_pose", 10);
-    geometry_msgs::msg::PoseWithCovarianceStamped msg;
-    msg.header.stamp = node->now();
-    msg.header.frame_id = "map";
-    msg.pose.pose.position.x = 1.0;
-    msg.pose.pose.position.y = 2.0;
-    msg.pose.pose.orientation.w = 1.0;
-    posePub->publish(msg);
+    // 直接调用渲染数据更新槽
+    RenderData data;
+    data.robot_pose_received = true;
+    data.robot_x = 1.0;
+    data.robot_y = 2.0;
+    data.robot_yaw = 0.5;
+    widget.onRenderDataReady(data);
 
     QApplication::processEvents();
     QTest::qWait(100);
@@ -847,23 +732,15 @@ void TestNav2ViewWidget::testDataUpdatedSignal()
 void TestNav2ViewWidget::testGoalPosePreviewSignal()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_goal_preview");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -889,23 +766,15 @@ void TestNav2ViewWidget::testGoalPosePreviewSignal()
 void TestNav2ViewWidget::testPaintEventWithNoData()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_paint_no_data");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
@@ -921,40 +790,26 @@ void TestNav2ViewWidget::testPaintEventWithNoData()
 void TestNav2ViewWidget::testPaintEventWithPath()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_paint_path");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
-    // 发布路径
-    auto pathPub = node->create_publisher<nav_msgs::msg::Path>("/plan", 10);
-    nav_msgs::msg::Path pathMsg;
-    pathMsg.header.stamp = node->now();
-    pathMsg.header.frame_id = "map";
+    // 直接设置渲染数据（包含路径）
+    RenderData data;
     for (int i = 0; i < 20; ++i) {
-        geometry_msgs::msg::PoseStamped pose;
-        pose.pose.position.x = i * 0.1;
-        pose.pose.position.y = i * 0.05;
-        pose.pose.orientation.w = 1.0;
-        pathMsg.poses.push_back(pose);
+        QPointF pt = transformer.mapToQt(i * 0.1, i * 0.05);
+        data.path_points.push_back(pt);
     }
-    pathPub->publish(pathMsg);
+    widget.onRenderDataReady(data);
 
     QApplication::processEvents();
     QTest::qWait(100);
@@ -969,37 +824,26 @@ void TestNav2ViewWidget::testPaintEventWithPath()
 void TestNav2ViewWidget::testPaintEventWithRobotPose()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_paint_robot");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
-    // 发布机器人位姿
-    auto posePub = node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/amcl_pose", 10);
-    geometry_msgs::msg::PoseWithCovarianceStamped poseMsg;
-    poseMsg.header.stamp = node->now();
-    poseMsg.header.frame_id = "map";
-    poseMsg.pose.pose.position.x = 0.5;
-    poseMsg.pose.pose.position.y = 0.3;
-    poseMsg.pose.pose.orientation.w = std::cos(0.5 / 2);
-    poseMsg.pose.pose.orientation.z = std::sin(0.5 / 2);
-    posePub->publish(poseMsg);
+    // 直接设置渲染数据（包含机器人位姿）
+    RenderData data;
+    data.robot_pose_received = true;
+    data.robot_x = 0.5;
+    data.robot_y = 0.3;
+    data.robot_yaw = 0.5;
+    widget.onRenderDataReady(data);
 
     QApplication::processEvents();
     QTest::qWait(100);
@@ -1014,37 +858,26 @@ void TestNav2ViewWidget::testPaintEventWithRobotPose()
 void TestNav2ViewWidget::testPaintEventWithGoalPose()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_paint_goal");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
-    // 发布目标位姿
-    auto goalPub = node->create_publisher<geometry_msgs::msg::PoseStamped>("/goal_pose", 10);
-    geometry_msgs::msg::PoseStamped goalMsg;
-    goalMsg.header.stamp = node->now();
-    goalMsg.header.frame_id = "map";
-    goalMsg.pose.position.x = 1.5;
-    goalMsg.pose.position.y = 1.0;
-    goalMsg.pose.orientation.w = std::cos(1.0 / 2);
-    goalMsg.pose.orientation.z = std::sin(1.0 / 2);
-    goalPub->publish(goalMsg);
+    // 直接设置渲染数据（包含目标位姿）
+    RenderData data;
+    data.goal_pose_received = true;
+    data.goal_x = 1.5;
+    data.goal_y = 1.0;
+    data.goal_yaw = 1.0;
+    widget.onRenderDataReady(data);
 
     QApplication::processEvents();
     QTest::qWait(100);
@@ -1063,34 +896,23 @@ void TestNav2ViewWidget::testPaintEventWithGoalPose()
 void TestNav2ViewWidget::testEmptyPath()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_empty_path");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
-    // 发布空路径
-    auto pathPub = node->create_publisher<nav_msgs::msg::Path>("/plan", 10);
-    nav_msgs::msg::Path pathMsg;
-    pathMsg.header.stamp = node->now();
-    pathMsg.header.frame_id = "map";
-    // 不添加任何位姿点
-    pathPub->publish(pathMsg);
+    // 发送空路径的渲染数据
+    RenderData data;
+    // path_points 为空
+    widget.onRenderDataReady(data);
 
     widget.update();
     QApplication::processEvents();
@@ -1102,40 +924,28 @@ void TestNav2ViewWidget::testEmptyPath()
 void TestNav2ViewWidget::testLargePath()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-5.0, -5.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_large_path");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
-    // 发布大路径（1000个点）
-    auto pathPub = node->create_publisher<nav_msgs::msg::Path>("/plan", 10);
-    nav_msgs::msg::Path pathMsg;
-    pathMsg.header.stamp = node->now();
-    pathMsg.header.frame_id = "map";
+    // 发送大路径（1000个点）的渲染数据
+    RenderData data;
     for (int i = 0; i < 1000; ++i) {
-        geometry_msgs::msg::PoseStamped pose;
-        pose.pose.position.x = i * 0.01;
-        pose.pose.position.y = std::sin(i * 0.1) * 0.5;
-        pose.pose.orientation.w = 1.0;
-        pathMsg.poses.push_back(pose);
+        double x = i * 0.01;
+        double y = std::sin(i * 0.1) * 0.5;
+        QPointF pt = transformer.mapToQt(x, y);
+        data.path_points.push_back(pt);
     }
-    pathPub->publish(pathMsg);
+    widget.onRenderDataReady(data);
 
     widget.update();
     QApplication::processEvents();
@@ -1147,43 +957,33 @@ void TestNav2ViewWidget::testLargePath()
 void TestNav2ViewWidget::testExtremeCoordinates()
 {
     QTemporaryFile yamlFile;
-    QVERIFY(yamlFile.open());
-
-    QImage testImage(100, 100, QImage::Format_RGB32);
-    testImage.fill(Qt::white);
-
     QTemporaryFile imageFile;
-    QVERIFY(imageFile.open());
-    QVERIFY(testImage.save(imageFile.fileName(), "PNG"));
+    QVERIFY(createTestMapFile(yamlFile, imageFile, 0.05, -100.0, -100.0));
 
-    QTextStream out(&yamlFile);
-    out << "image: " << imageFile.fileName() << "\n";
-    out << "resolution: 0.05\n";
-    out << "origin: [-100.0, -100.0, 0.0]\n";
-    out.flush();
+    QImage mapImage;
+    CoordinateTransformer transformer;
+    QVERIFY(loadMapData(yamlFile.fileName().toStdString(), mapImage, transformer));
 
-    auto node = std::make_shared<rclcpp::Node>("test_extreme_coords");
-    Nav2ViewWidget widget(yamlFile.fileName().toStdString(), node);
+    Nav2ViewWidget widget(nullptr);
+    widget.onMapLoaded(mapImage, transformer);
 
     widget.show();
     (void)QTest::qWaitForWindowExposed(&widget);
 
     // 测试极端坐标值
-    auto posePub = node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/amcl_pose", 10);
+    RenderData data1;
+    data1.robot_pose_received = true;
+    data1.robot_x = 1000.0;
+    data1.robot_y = 1000.0;
+    data1.robot_yaw = 0.0;
+    widget.onRenderDataReady(data1);
 
-    geometry_msgs::msg::PoseWithCovarianceStamped msg1;
-    msg1.header.stamp = node->now();
-    msg1.pose.pose.position.x = 1000.0;
-    msg1.pose.pose.position.y = 1000.0;
-    msg1.pose.pose.orientation.w = 1.0;
-    posePub->publish(msg1);
-
-    geometry_msgs::msg::PoseWithCovarianceStamped msg2;
-    msg2.header.stamp = node->now();
-    msg2.pose.pose.position.x = -1000.0;
-    msg2.pose.pose.position.y = -1000.0;
-    msg2.pose.pose.orientation.w = 1.0;
-    posePub->publish(msg2);
+    RenderData data2;
+    data2.robot_pose_received = true;
+    data2.robot_x = -1000.0;
+    data2.robot_y = -1000.0;
+    data2.robot_yaw = 0.0;
+    widget.onRenderDataReady(data2);
 
     widget.update();
     QApplication::processEvents();

@@ -45,6 +45,40 @@ private slots:
     void testParamInfoDefaultValues();
     void testParamTaskConstructor();
 
+    // 参数转换测试 (P0)
+    void testParameterToVariantDouble();
+    void testParameterToVariantInt();
+    void testParameterToVariantBool();
+    void testParameterToVariantString();
+    void testParameterToVariantDoubleArray();
+    void testParameterToVariantDoubleArrayEmpty();
+    void testParameterToVariantUnsupportedType();
+    void testVariantToParameterDouble();
+    void testVariantToParameterInt();
+    void testVariantToParameterBool();
+    void testVariantToString();
+    void testVariantToParameterUnsupportedType();
+
+    // 信号测试 (P0)
+    void testParameterRefreshedSignal();
+    void testParameterAppliedSignal();
+    void testParameterAppliedSignalPartialFailure();
+    void testOperationProgressSignal();
+
+    // 边界值测试
+    void testSetPendingValueZero();
+    void testSetPendingValueNegative();
+    void testSetPendingVeryLargeValue();
+    void testParameterToVariantZero();
+
+    // 状态一致性测试
+    void testModifiedFlagAfterSetPending();
+    void testModifiedFlagAfterDiscard();
+    void testPendingValueAfterDiscard();
+
+    // 数组参数测试
+    void testArrayParameterYDirection();
+
 private:
     Nav2ParameterThread* m_thread;
 };

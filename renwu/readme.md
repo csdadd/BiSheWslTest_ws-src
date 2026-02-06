@@ -1,6 +1,6 @@
 这个项目只需要显示固定的地图图片和机器人的实时的位置，不需要订阅实时的地图
 
-为测试方便，将开启登陆界面的代码，直接启动主界面
+为测试方便，将开启登陆界面的代码，直接启动主界面（已测试完毕，恢复了登录功能）
 
 ## 废弃代码说明
 
@@ -14,6 +14,15 @@
 | `mapwidget.h/cpp` | 基础地图显示组件，使用 QGraphicsView 架构 |
 
 **保留原因**: 证明开发工作量
+
+| 废弃的代码文件 | 废弃的测试文件 | 废弃原因 |
+|---------------|---------------|---------|
+| `navstatusthread.h/cpp` | `test/testnavstatusthread.h/cpp` | 已被 NavigationActionThread 替代 |
+| `navigationactionclient.h/cpp` | `test/testnavigationactionclient.h/cpp` | 已被 NavigationActionThread（独立线程模式）替代 |
+| `mapthread.h/cpp` | `test/testmapthread.h/cpp` | 项目改用固定地图图片，不再订阅实时地图 |
+| `mapwidget.h/cpp` | `test/testmapwidget.h/cpp` | 已被 Nav2ViewWidget（高级导航可视化组件）替代 |
+
+**测试跳过方式**: 在各测试类的 `initTestCase()` 中使用 `QSKIP()` 跳过整个测试套件
 
 ---
 

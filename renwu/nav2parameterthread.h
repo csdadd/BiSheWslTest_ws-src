@@ -78,6 +78,8 @@ protected:
     void initialize() override;
     void process() override;
     void cleanup() override;
+    QVariant parameterToVariant(const rclcpp::Parameter& param);
+    rclcpp::Parameter variantToParameter(const QVariant& value, const QString& paramName);
 
 private:
     void registerParameters();
@@ -89,8 +91,6 @@ private:
     void executeReset();
     void executeDiscard();
     bool hasParameter(const QString& key) const;
-    QVariant parameterToVariant(const rclcpp::Parameter& param);
-    rclcpp::Parameter variantToParameter(const QVariant& value, const QString& paramName);
 
 private:
     rclcpp::Node::SharedPtr m_node;

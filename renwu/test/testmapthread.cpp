@@ -1,7 +1,14 @@
+// ==================== DEPRECATED ====================
+// 此测试文件已废弃，对应的源文件 mapthread.h/cpp 已废弃
+// 废弃原因：项目改用固定地图图片，不再订阅实时地图
+// 保留原因：作为工作量证明保留
+// ================================================
+
 #include "testmapthread.h"
 
 void TestMapThread::initTestCase()
 {
+    QSKIP("此测试已废弃：MapThread 已废弃，项目改用固定地图图片");
 }
 
 void TestMapThread::cleanupTestCase()
@@ -98,3 +105,5 @@ void TestMapThread::testThreadLifecycle()
     m_thread->wait();
     QVERIFY(!m_thread->isRunning());
 }
+
+#include "testmapthread.moc"

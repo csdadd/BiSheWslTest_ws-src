@@ -2,6 +2,7 @@
 #include "ui_logindialog.h"
 #include <QDebug>
 #include <QtConcurrent>
+#include <QShowEvent>
 
 LoginDialog::LoginDialog(UserAuthManager* authManager, QWidget *parent)
     : QDialog(parent)
@@ -50,6 +51,23 @@ void LoginDialog::setUiEnabled(bool enabled)
     ui->cancelButton->setEnabled(enabled);
     ui->usernameEdit->setEnabled(enabled);
     ui->passwordEdit->setEnabled(enabled);
+}
+
+void LoginDialog::resetDialog()
+{
+    setUiEnabled(true);
+    ui->usernameEdit->clear();
+    ui->passwordEdit->clear();
+    ui->messageLabel->clear();
+    ui->messageLabel->hide();
+    m_currentUser = User();
+    ui->usernameEdit->setFocus();
+}
+
+void LoginDialog::showEvent(QShowEvent* event)
+{
+    QDialog::showEvent(event);
+    resetDialog();
 }
 
 void LoginDialog::onLoginClicked()
@@ -106,6 +124,7 @@ void LoginDialog::onCancelClicked()
 void LoginDialog::onLoginSuccess(const User& user)
 {
     m_currentUser = user;
+    setUiEnabled(true);
     qDebug() << "[LoginDialog] Login successful for user:" << user.getUsername();
     accept();
 }

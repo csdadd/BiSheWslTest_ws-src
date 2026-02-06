@@ -3,6 +3,7 @@
 
 #include <QString>
 #include <QDateTime>
+#include <QMetaType>
 
 enum class UserPermission {
     VIEWER = 0,
@@ -79,5 +80,7 @@ inline UserPermission User::stringToPermission(const QString& str)
     }
     return UserPermission::VIEWER;
 }
+
+Q_DECLARE_METATYPE(User)
 
 #endif // USER_H

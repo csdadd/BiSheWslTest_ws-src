@@ -629,6 +629,88 @@ renwu/test/
 22. **testQueryLogsAsync**: 测试异步日志查询
 23. **testThreadLifecycle**: 测试线程生命周期
 
+### 29. Nav2ParameterThread 单元测试
+
+#### 测试用例列表
+
+1. **testParameterCount**: 测试参数数量
+2. **testParameterMapping**: 测试参数映射关系
+3. **testNodeNames**: 测试节点名称
+4. **testRobotRadiusMultiNode**: 测试多节点参数
+5. **testVelocitySmootherArrayParams**: 测试速度平滑器数组参数
+6. **testGetParamInfo**: 测试获取参数信息
+7. **testGetParamInfoInvalidKey**: 测试无效键获取参数信息
+8. **testGetAllParams**: 测试获取所有参数
+9. **testSetPendingValue**: 测试设置待应用值
+10. **testSetPendingValueInvalidKey**: 测试无效键设置待应用值
+11. **testHasPendingChanges**: 测试检查待应用更改
+12. **testHasPendingChangesNoModifications**: 测试无修改时的待应用更改检查
+13. **testMultipleModifiedParams**: 测试多参数修改
+14. **testRequestRefresh**: 测试请求刷新
+15. **testRequestApply**: 测试请求应用
+16. **testRequestReset**: 测试请求重置
+17. **testRequestDiscard**: 测试请求放弃
+18. **testTaskQueueOrder**: 测试任务队列顺序
+19. **testParamInfoPrimaryNode**: 测试主节点获取
+20. **testParamInfoDefaultValues**: 测试参数默认值
+21. **testParamTaskConstructor**: 测试任务构造函数
+
+#### 新增测试用例 (P0)
+
+**参数转换测试**:
+22. **testParameterToVariantDouble**: 测试 double 参数转换为 QVariant
+23. **testParameterToVariantInt**: 测试 int 参数转换为 QVariant
+24. **testParameterToVariantBool**: 测试 bool 参数转换为 QVariant
+25. **testParameterToVariantString**: 测试 string 参数转换为 QVariant
+26. **testParameterToVariantDoubleArray**: 测试 double 数组参数转换为 QVariant（取首元素）
+27. **testParameterToVariantDoubleArrayEmpty**: 测试空数组参数转换
+28. **testParameterToVariantUnsupportedType**: 测试不支持类型的转换
+29. **testVariantToParameterDouble**: 测试 QVariant 转换为 double 参数
+30. **testVariantToParameterInt**: 测试 QVariant 转换为 int 参数
+31. **testVariantToParameterBool**: 测试 QVariant 转换为 bool 参数
+32. **testVariantToString**: 测试 QVariant 转换为 string 参数
+33. **testVariantToParameterUnsupportedType**: 测试不支持 QVariant 类型的转换
+
+**信号测试**:
+34. **testParameterRefreshedSignal**: 测试 parameterRefreshed 信号
+35. **testParameterAppliedSignal**: 测试 parameterApplied 信号
+36. **testParameterAppliedSignalPartialFailure**: 测试部分失败时的信号
+37. **testOperationProgressSignal**: 测试 operationProgress 信号
+
+### 30. Nav2ParameterThread 集成测试
+
+#### 测试用例列表
+
+1. **testReadNormalParameters**: 测试读取普通参数
+2. **testReadArrayParameters**: 测试读取数组参数
+3. **testReadCostmapParameters**: 测试读取代价地图参数
+4. **testReadRobotRadius**: 测试读取机器人半径
+5. **testAllParametersRead**: 测试所有参数读取
+6. **testWriteNormalParameter**: 测试写入普通参数
+7. **testWriteArrayParameter**: 测试写入数组参数
+8. **testWriteRobotRadius**: 测试写入机器人半径（多节点）
+9. **testWriteBatchParameters**: 测试批量写入参数
+10. **testWriteWithNoModifications**: 测试无修改时的写入
+11. **testRefreshAllParameters**: 测试刷新所有参数
+12. **testRefreshPreservesDefault**: 测试刷新保留默认值
+13. **testResetAllParameters**: 测试重置所有参数
+14. **testResetThenApply**: 测试重置后应用
+15. **testDiscardSingleParameter**: 测试放弃单个参数修改
+16. **testDiscardMultipleParameters**: 测试放弃多个参数修改
+17. **testDiscardNoModifications**: 测试无修改时的放弃
+18. **testConcurrentRefreshAndModify**: 测试并发刷新和修改
+19. **testRapidSequentialOperations**: 测试快速连续操作
+20. **testNodeUnavailable**: 测试节点不可用场景
+21. **testOperationFinishedSignal**: 测试操作完成信号
+
+#### 新增测试用例 (P0)
+
+**信号测试**:
+22. **testParameterRefreshedSignalSuccess**: 测试刷新成功时的信号
+23. **testParameterRefreshedSignalFailure**: 测试刷新失败时的信号
+24. **testParameterAppliedSignalWithMultipleParams**: 测试多参数应用时的信号
+25. **testOperationProgressSignalDuringRefresh**: 测试刷新过程中的进度信号
+
 ## 编译和运行测试
 
 ### 编译测试
@@ -834,6 +916,35 @@ colcon test-result --all --verbose
 - UI权限控制: 100%
 - 异步日志查询: 100%
 - 线程生命周期: 100%
+
+### Nav2ParameterThread
+
+- 参数注册和映射: 100%
+- 参数信息获取: 100%
+- 待应用值设置: 100%
+- 任务队列操作: 100%
+- 参数转换 (parameterToVariant): 100%
+- 参数转换 (variantToParameter): 100%
+- 信号发射 (parameterRefreshed): 100%
+- 信号发射 (parameterApplied): 100%
+- 信号发射 (operationProgress): 基础覆盖
+- 线程安全操作: 100%
+
+### Nav2ParameterThread 集成测试
+
+- 参数读取（普通参数）: 100%
+- 参数读取（数组参数）: 100%
+- 参数读取（代价地图参数）: 100%
+- 参数读取（机器人半径多节点）: 100%
+- 参数写入（普通参数）: 100%
+- 参数写入（数组参数）: 100%
+- 参数写入（多节点参数）: 100%
+- 参数写入（批量参数）: 100%
+- 刷新功能: 100%
+- 重置功能: 100%
+- 放弃功能: 100%
+- 线程安全（并发操作）: 100%
+- 信号测试: 100%
 
 ## 注意事项
 

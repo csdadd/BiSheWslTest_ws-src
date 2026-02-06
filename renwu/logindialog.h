@@ -24,6 +24,9 @@ public:
 
     User getCurrentUser() const;
 
+protected:
+    void showEvent(QShowEvent* event) override;
+
 private slots:
     void onLoginClicked();
     void onCancelClicked();
@@ -34,6 +37,7 @@ private slots:
 private:
     void setupConnections();
     void setUiEnabled(bool enabled);
+    void resetDialog();
 
 private:
     Ui::LoginDialog *ui;

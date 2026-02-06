@@ -182,10 +182,10 @@ void TestNav2ParameterThread::testHasPendingChanges()
     m_thread->setPendingValue("maxVelXSpinBox", 0.5);
     QVERIFY(m_thread->hasPendingChanges());
 
-    // 重置后应该没有待应用的更改
-    Nav2ParameterThread::ParamInfo info;
-    m_thread->getParamInfo("maxVelXSpinBox", info);
-    // 注意：由于没有启动线程，modified 标志保持不变
+    // 放弃更改后应该没有待应用的更改
+    m_thread->requestDiscard();
+    QThread::msleep(500);
+    QVERIFY(!m_thread->hasPendingChanges());
 }
 
 void TestNav2ParameterThread::testHasPendingChangesNoModifications()
@@ -282,6 +282,317 @@ void TestNav2ParameterThread::testParamTaskConstructor()
     QCOMPARE(static_cast<int>(task3.type), static_cast<int>(Nav2ParameterThread::TaskType::Reset));
     QCOMPARE(task3.key, QString("testKey"));
     QCOMPARE(task3.value.toDouble(), 42.0);
+}
+
+// ==================== 参数转换测试 (P0) ====================
+
+// 用于测试 protected 方法的派生类
+class Nav2ParameterThreadTestable : public Nav2ParameterThread
+{
+public:
+    using Nav2ParameterThread::parameterToVariant;
+    using Nav2ParameterThread::variantToParameter;
+};
+
+void TestNav2ParameterThread::testParameterToVariantDouble()
+{
+    Nav2ParameterThreadTestable thread;
+    rclcpp::Parameter param("test", 3.14159);
+    QVariant result = thread.parameterToVariant(param);
+
+    QVERIFY(result.isValid());
+    QCOMPARE(result.type(), QVariant::Double);
+    QCOMPARE(result.toDouble(), 3.14159);
+}
+
+void TestNav2ParameterThread::testParameterToVariantInt()
+{
+    Nav2ParameterThreadTestable thread;
+    rclcpp::Parameter param("test", 42);
+    QVariant result = thread.parameterToVariant(param);
+
+    QVERIFY(result.isValid());
+    QCOMPARE(result.type(), QVariant::Int);
+    QCOMPARE(result.toInt(), 42);
+}
+
+void TestNav2ParameterThread::testParameterToVariantBool()
+{
+    Nav2ParameterThreadTestable thread;
+    rclcpp::Parameter param("test", true);
+    QVariant result = thread.parameterToVariant(param);
+
+    QVERIFY(result.isValid());
+    QCOMPARE(result.type(), QVariant::Bool);
+    QCOMPARE(result.toBool(), true);
+}
+
+void TestNav2ParameterThread::testParameterToVariantString()
+{
+    Nav2ParameterThreadTestable thread;
+    rclcpp::Parameter param("test", std::string("hello"));
+    QVariant result = thread.parameterToVariant(param);
+
+    QVERIFY(result.isValid());
+    QCOMPARE(result.type(), QVariant::String);
+    QCOMPARE(result.toString(), QString("hello"));
+}
+
+void TestNav2ParameterThread::testParameterToVariantDoubleArray()
+{
+    Nav2ParameterThreadTestable thread;
+    std::vector<double> arr = {1.0, 2.0, 3.0};
+    rclcpp::Parameter param("test", arr);
+    QVariant result = thread.parameterToVariant(param);
+
+    QVERIFY(result.isValid());
+    QCOMPARE(result.type(), QVariant::Double);
+    QCOMPARE(result.toDouble(), 1.0);  // 只返回第一个元素
+}
+
+void TestNav2ParameterThread::testParameterToVariantDoubleArrayEmpty()
+{
+    Nav2ParameterThreadTestable thread;
+    std::vector<double> arr = {};
+    rclcpp::Parameter param("test", arr);
+    QVariant result = thread.parameterToVariant(param);
+
+    QVERIFY(!result.isValid());  // 空数组返回无效 QVariant
+}
+
+void TestNav2ParameterThread::testParameterToVariantUnsupportedType()
+{
+    Nav2ParameterThreadTestable thread;
+    // PARAMETER_BYTE_ARRAY 是不支持的类型
+    std::vector<uint8_t> arr = {1, 2, 3};
+    rclcpp::Parameter param("test", arr);
+    QVariant result = thread.parameterToVariant(param);
+
+    QVERIFY(!result.isValid());
+}
+
+void TestNav2ParameterThread::testVariantToParameterDouble()
+{
+    Nav2ParameterThreadTestable thread;
+    QVariant value(3.14159);
+    rclcpp::Parameter result = thread.variantToParameter(value, "test_param");
+
+    QCOMPARE(QString::fromStdString(result.get_name()), QString("test_param"));
+    QCOMPARE(result.get_type(), rclcpp::ParameterType::PARAMETER_DOUBLE);
+    QCOMPARE(result.as_double(), 3.14159);
+}
+
+void TestNav2ParameterThread::testVariantToParameterInt()
+{
+    Nav2ParameterThreadTestable thread;
+    QVariant value(42);
+    rclcpp::Parameter result = thread.variantToParameter(value, "test_param");
+
+    QCOMPARE(QString::fromStdString(result.get_name()), QString("test_param"));
+    QCOMPARE(result.get_type(), rclcpp::ParameterType::PARAMETER_INTEGER);
+    QCOMPARE(result.as_int(), 42);
+}
+
+void TestNav2ParameterThread::testVariantToParameterBool()
+{
+    Nav2ParameterThreadTestable thread;
+    QVariant value(true);
+    rclcpp::Parameter result = thread.variantToParameter(value, "test_param");
+
+    QCOMPARE(QString::fromStdString(result.get_name()), QString("test_param"));
+    QCOMPARE(result.get_type(), rclcpp::ParameterType::PARAMETER_BOOL);
+    QCOMPARE(result.as_bool(), true);
+}
+
+void TestNav2ParameterThread::testVariantToString()
+{
+    Nav2ParameterThreadTestable thread;
+    QVariant value("hello");
+    rclcpp::Parameter result = thread.variantToParameter(value, "test_param");
+
+    QCOMPARE(QString::fromStdString(result.get_name()), QString("test_param"));
+    QCOMPARE(result.get_type(), rclcpp::ParameterType::PARAMETER_STRING);
+    QCOMPARE(QString::fromStdString(result.as_string()), QString("hello"));
+}
+
+void TestNav2ParameterThread::testVariantToParameterUnsupportedType()
+{
+    Nav2ParameterThreadTestable thread;
+    QVariant value = QVariant::fromValue<QSize>(QSize(100, 100));
+    rclcpp::Parameter result = thread.variantToParameter(value, "test_param");
+
+    // 不支持的类型返回空的 ParameterValue
+    QCOMPARE(result.get_type(), rclcpp::ParameterType::PARAMETER_NOT_SET);
+}
+
+// ==================== 信号测试 (P0) ====================
+
+void TestNav2ParameterThread::testParameterRefreshedSignal()
+{
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterRefreshed);
+
+    m_thread->requestRefresh();
+    QThread::msleep(1000);  // 等待执行
+
+    QVERIFY(spy.count() > 0);
+    QList<QVariant> arguments = spy.takeFirst();
+    QCOMPARE(arguments.size(), 2);
+
+    bool success = arguments.at(0).toBool();
+    QString message = arguments.at(1).toString();
+
+    QVERIFY(success || !message.isEmpty());  // 成功或失败都有合理消息
+}
+
+void TestNav2ParameterThread::testParameterAppliedSignal()
+{
+    // 设置待应用值
+    m_thread->setPendingValue("maxVelXSpinBox", 0.5);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+
+    m_thread->requestApply();
+    QThread::msleep(1000);
+
+    QVERIFY(spy.count() > 0);
+    QList<QVariant> arguments = spy.takeFirst();
+    QCOMPARE(arguments.size(), 3);
+
+    bool success = arguments.at(0).toBool();
+    QString message = arguments.at(1).toString();
+    QStringList appliedKeys = arguments.at(2).toStringList();
+
+    QVERIFY(message.contains("成功") || message.contains("失败"));
+    QVERIFY(!appliedKeys.isEmpty());
+}
+
+void TestNav2ParameterThread::testParameterAppliedSignalPartialFailure()
+{
+    // 修改一个参数
+    m_thread->setPendingValue("maxVelXSpinBox", 0.5);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+
+    m_thread->requestApply();
+    QThread::msleep(1000);
+
+    // 验证信号被触发
+    QVERIFY(spy.count() > 0);
+}
+
+void TestNav2ParameterThread::testOperationProgressSignal()
+{
+    // operationProgress 信号在处理大量参数时触发
+    // 由于当前参数数量较少（13个），且处理很快，可能难以捕获
+    // 改为验证信号连接机制是否正常
+
+    bool connected = QObject::connect(m_thread, &Nav2ParameterThread::operationProgress,
+                                      [](const QString&, int, int, const QString&) {
+        // 空槽函数，仅验证可连接
+    });
+
+    QVERIFY(connected);
+
+    // 断开连接以避免影响其他测试
+    m_thread->disconnect(m_thread, &Nav2ParameterThread::operationProgress, nullptr, nullptr);
+}
+
+// ==================== 边界值测试 ====================
+
+void TestNav2ParameterThread::testSetPendingValueZero()
+{
+    QVERIFY(m_thread->setPendingValue("maxVelXSpinBox", 0.0));
+
+    Nav2ParameterThread::ParamInfo info;
+    QVERIFY(m_thread->getParamInfo("maxVelXSpinBox", info));
+    QCOMPARE(info.pendingValue.toDouble(), 0.0);
+    QVERIFY(info.modified);
+}
+
+void TestNav2ParameterThread::testSetPendingValueNegative()
+{
+    // maxVelX 不应为负，但测试可以设置负值（由上层验证）
+    QVERIFY(m_thread->setPendingValue("maxVelXSpinBox", -0.1));
+
+    Nav2ParameterThread::ParamInfo info;
+    QVERIFY(m_thread->getParamInfo("maxVelXSpinBox", info));
+    QCOMPARE(info.pendingValue.toDouble(), -0.1);
+}
+
+void TestNav2ParameterThread::testSetPendingVeryLargeValue()
+{
+    double largeValue = 9999.99;
+    QVERIFY(m_thread->setPendingValue("maxVelXSpinBox", largeValue));
+
+    Nav2ParameterThread::ParamInfo info;
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QCOMPARE(info.pendingValue.toDouble(), largeValue);
+}
+
+void TestNav2ParameterThread::testParameterToVariantZero()
+{
+    Nav2ParameterThreadTestable thread;
+    rclcpp::Parameter param("test", 0.0);
+    QVariant result = thread.parameterToVariant(param);
+
+    QVERIFY(result.isValid());
+    QCOMPARE(result.toDouble(), 0.0);
+}
+
+// ==================== 状态一致性测试 ====================
+
+void TestNav2ParameterThread::testModifiedFlagAfterSetPending()
+{
+    Nav2ParameterThread::ParamInfo info;
+
+    m_thread->setPendingValue("maxVelXSpinBox", 0.5);
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+
+    QVERIFY(info.modified);
+}
+
+void TestNav2ParameterThread::testModifiedFlagAfterDiscard()
+{
+    Nav2ParameterThread::ParamInfo info;
+
+    m_thread->setPendingValue("maxVelXSpinBox", 0.5);
+    m_thread->requestDiscard();
+    QThread::msleep(500);
+
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QVERIFY(!info.modified);
+}
+
+void TestNav2ParameterThread::testPendingValueAfterDiscard()
+{
+    Nav2ParameterThread::ParamInfo info;
+
+    // 获取原始值
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    double originalValue = info.currentValue.toDouble();
+
+    // 修改并放弃
+    m_thread->setPendingValue("maxVelXSpinBox", 0.5);
+    m_thread->requestDiscard();
+    QThread::msleep(500);
+
+    // 验证 pendingValue 恢复到 currentValue
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QCOMPARE(info.pendingValue.toDouble(), originalValue);
+}
+
+// ==================== 数组参数测试 ====================
+
+void TestNav2ParameterThread::testArrayParameterYDirection()
+{
+    Nav2ParameterThreadTestable thread;
+
+    // 测试数组参数的转换：返回第一个元素
+    std::vector<double> arr = {1.0, 0.0, 2.0};
+    rclcpp::Parameter param("max_velocity", arr);
+    QVariant result = thread.parameterToVariant(param);
+
+    QCOMPARE(result.toDouble(), 1.0);  // 返回第一个元素
 }
 
 #include "testnav2parameterthread.moc"

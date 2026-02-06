@@ -71,6 +71,10 @@ private:
     bool validateUsername(const QString& username);
     void onSessionTimeout();
 
+    // 内部实现函数（不加锁版本，供其他内部函数调用）
+    bool hasPermissionImpl(UserPermission requiredPermission) const;
+    User getCurrentUserImpl() const;
+
 private:
     struct LoginAttempt {
         int count = 0;

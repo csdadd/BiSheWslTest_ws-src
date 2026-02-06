@@ -1,3 +1,9 @@
+// ==================== DEPRECATED ====================
+// 此测试文件已废弃，对应的源文件 navigationactionclient.h/cpp 已废弃
+// 废弃原因：已被 NavigationActionThread（独立线程模式）替代
+// 保留原因：作为工作量证明保留
+// ================================================
+
 #ifndef TESTNAVIGATIONACTIONCLIENT_H
 #define TESTNAVIGATIONACTIONCLIENT_H
 

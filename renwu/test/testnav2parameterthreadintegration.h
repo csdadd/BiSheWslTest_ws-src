@@ -53,6 +53,24 @@ private slots:
 
     // 信号测试
     void testOperationFinishedSignal();
+    void testParameterRefreshedSignalSuccess();
+    void testParameterRefreshedSignalFailure();
+    void testParameterAppliedSignalWithMultipleParams();
+    void testOperationProgressSignalDuringRefresh();
+
+    // velocity_smoother 数组参数测试
+    void testVelocitySmootherArrayParameterWrite();
+
+    // 多节点参数测试
+    void testMultiNodeParameterConsistency();
+
+    // 默认值保留测试
+    void testDefaultValuePreservedAfterModify();
+
+    // 完整工作流测试
+    void testFullWorkflowModifyApplyRefresh();
+    void testFullWorkflowModifyResetApply();
+    void testFullWorkflowModifyDiscard();
 
 private:
     Nav2ParameterThread* m_thread;

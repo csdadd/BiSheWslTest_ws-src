@@ -1,7 +1,14 @@
+// ==================== DEPRECATED ====================
+// 此测试文件已废弃，对应的源文件 navstatusthread.h/cpp 已废弃
+// 废弃原因：已被 NavigationActionThread 替代
+// 保留原因：作为工作量证明保留
+// ================================================
+
 #include "testnavstatusthread.h"
 
 void TestNavStatusThread::initTestCase()
 {
+    QSKIP("此测试已废弃：NavStatusThread 已被 NavigationActionThread 替代");
 }
 
 void TestNavStatusThread::cleanupTestCase()
@@ -109,3 +116,5 @@ void TestNavStatusThread::testThreadLifecycle()
     m_thread->wait();
     QVERIFY(!m_thread->isRunning());
 }
+
+#include "testnavstatusthread.moc"
