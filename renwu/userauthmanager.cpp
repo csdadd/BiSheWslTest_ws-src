@@ -415,6 +415,27 @@ QVector<User> UserAuthManager::getAllUsers()
     return m_storageEngine->getAllUsers();
 }
 
+void UserAuthManager::setTestAdminMode()
+{
+    QMutexLocker locker(&m_mutex);
+
+    // 创建测试管理员用户
+    User testAdmin(1, "TestAdmin", "", UserPermission::ADMIN);
+    testAdmin.setActive(true);
+    testAdmin.setCreatedAt(QDateTime::currentDateTime());
+    testAdmin.setLastLogin(QDateTime::currentDateTime());
+
+    m_currentUser = testAdmin;
+    m_loggedIn = true;
+
+    // 启动会话超时定时器
+    m_sessionTimeoutTimer->start(SESSION_TIMEOUT_MINUTES * 60 * 1000);
+
+    emit loginSuccess(m_currentUser);
+
+    qDebug() << "[UserAuthManager] 测试模式：以管理员身份登录";
+}
+
 QString UserAuthManager::getLastError() const
 {
     QMutexLocker locker(&m_mutex);

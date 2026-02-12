@@ -82,7 +82,7 @@ void TestLogThread::testWriteLogEntry()
     m_logThread->start();
     QTest::qWait(100);
 
-    LogEntry entry("Test message", LOG_INFO, QDateTime::currentDateTime(), "TestSource", "TestCategory");
+    LogEntry entry("Test message", LOG_INFO, QDateTime::currentDateTime(), "TestSource");
     m_logThread->writeLogEntry(entry);
     QTest::qWait(100);
 

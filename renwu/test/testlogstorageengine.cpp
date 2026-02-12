@@ -53,7 +53,7 @@ void TestLogStorageEngine::testIsInitialized()
 
 void TestLogStorageEngine::testInsertLog()
 {
-    StorageLogEntry entry("Test message", LogLevel::INFO, QDateTime::currentDateTime(), "TestSource", "TestCategory");
+    StorageLogEntry entry("Test message", LogLevel::INFO, QDateTime::currentDateTime(), "TestSource");
     QVERIFY(m_engine->insertLog(entry));
 
     QVector<StorageLogEntry> logs = m_engine->queryLogs(QDateTime(), QDateTime());

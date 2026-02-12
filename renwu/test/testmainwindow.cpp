@@ -349,63 +349,70 @@ void TestMainWindow::testLogFilterCheckBoxesUI()
     QVERIFY(fatalCheckBox->isChecked());
 }
 
-void TestMainWindow::testShouldDisplayLog()
+void TestMainWindow::testLogFiltering()
 {
     QCheckBox* debugCheckBox = m_mainWindow->findChild<QCheckBox*>("debugCheckBox");
     QCheckBox* infoCheckBox = m_mainWindow->findChild<QCheckBox*>("infoCheckBox");
     QCheckBox* warningCheckBox = m_mainWindow->findChild<QCheckBox*>("warningCheckBox");
     QCheckBox* errorCheckBox = m_mainWindow->findChild<QCheckBox*>("errorCheckBox");
     QCheckBox* fatalCheckBox = m_mainWindow->findChild<QCheckBox*>("fatalCheckBox");
+    QTableView* logTableView = m_mainWindow->findChild<QTableView*>("logTableView");
 
     QVERIFY(debugCheckBox != nullptr);
     QVERIFY(infoCheckBox != nullptr);
     QVERIFY(warningCheckBox != nullptr);
     QVERIFY(errorCheckBox != nullptr);
     QVERIFY(fatalCheckBox != nullptr);
+    QVERIFY(logTableView != nullptr);
 
-    // 测试默认状态（所有复选框都勾选）
-    bool result = false;
-    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
-                              Q_RETURN_ARG(bool, result),
-                              Q_ARG(int, 0));  // LOG_DEBUG = 0
-    QVERIFY(result);
+    // 获取 LogFilterProxyModel
+    auto* proxyModel = qobject_cast<QSortFilterProxyModel*>(logTableView->model());
+    QVERIFY(proxyModel != nullptr);
 
-    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
-                              Q_RETURN_ARG(bool, result),
-                              Q_ARG(int, 1));  // LOG_INFO = 1
-    QVERIFY(result);
+    // 添加测试日志数据
+    QDateTime now = QDateTime::currentDateTime();
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Debug message"),
+                              Q_ARG(int, 0),  // LOG_DEBUG
+                              Q_ARG(QDateTime, now));
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Info message"),
+                              Q_ARG(int, 1),  // LOG_INFO
+                              Q_ARG(QDateTime, now.addSecs(1)));
+    QMetaObject::invokeMethod(m_mainWindow, "onLogMessageReceived", Qt::DirectConnection,
+                              Q_ARG(QString, "Warning message"),
+                              Q_ARG(int, 2),  // LOG_WARNING
+                              Q_ARG(QDateTime, now.addSecs(2)));
 
-    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
-                              Q_RETURN_ARG(bool, result),
-                              Q_ARG(int, 2));  // LOG_WARNING = 2
-    QVERIFY(result);
+    // 测试默认状态（所有复选框都勾选）- 应该显示所有日志
+    QCOMPARE(proxyModel->rowCount(), 3);
 
-    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
-                              Q_RETURN_ARG(bool, result),
-                              Q_ARG(int, 3));  // LOG_ERROR = 3
-    QVERIFY(result);
-
-    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
-                              Q_RETURN_ARG(bool, result),
-                              Q_ARG(int, 4));  // LOG_FATAL = 4
-    QVERIFY(result);
-
-    // 取消勾选 DEBUG 复选框
+    // 取消勾选 DEBUG 复选框 - 应该过滤掉 DEBUG 日志
     debugCheckBox->setChecked(false);
+    QMetaObject::invokeMethod(m_mainWindow, "refreshLogDisplay", Qt::DirectConnection);
+    QCOMPARE(proxyModel->rowCount(), 2);
 
-    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
-                              Q_RETURN_ARG(bool, result),
-                              Q_ARG(int, 0));  // LOG_DEBUG
-    QVERIFY(!result);
+    // 取消勾选 INFO 复选框 - 应该再过滤掉 INFO 日志
+    infoCheckBox->setChecked(false);
+    QMetaObject::invokeMethod(m_mainWindow, "refreshLogDisplay", Qt::DirectConnection);
+    QCOMPARE(proxyModel->rowCount(), 1);
 
     // 恢复 DEBUG 复选框
     debugCheckBox->setChecked(true);
+    QMetaObject::invokeMethod(m_mainWindow, "refreshLogDisplay", Qt::DirectConnection);
+    QCOMPARE(proxyModel->rowCount(), 2);
 
-    // 测试未知日志级别
-    QMetaObject::invokeMethod(m_mainWindow, "shouldDisplayLog", Qt::DirectConnection,
-                              Q_RETURN_ARG(bool, result),
-                              Q_ARG(int, 999));  // 未知级别
-    QVERIFY(!result);
+    // 取消勾选 WARNING - 应该过滤掉所有日志
+    warningCheckBox->setChecked(false);
+    QMetaObject::invokeMethod(m_mainWindow, "refreshLogDisplay", Qt::DirectConnection);
+    QCOMPARE(proxyModel->rowCount(), 1);
+
+    // 恢复所有复选框
+    debugCheckBox->setChecked(true);
+    infoCheckBox->setChecked(true);
+    warningCheckBox->setChecked(true);
+    QMetaObject::invokeMethod(m_mainWindow, "refreshLogDisplay", Qt::DirectConnection);
+    QCOMPARE(proxyModel->rowCount(), 3);
 }
 
 void TestMainWindow::testRefreshLogDisplay()

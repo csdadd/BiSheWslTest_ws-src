@@ -3,8 +3,6 @@
 
 #include "basethread.h"
 #include "roscontextmanager.h"
-#include "threadsafequeue.h"
-#include "logstorageengine.h"
 #include "loglevel.h"
 #include <memory>
 #include <rclcpp/rclcpp.hpp>
@@ -21,12 +19,11 @@ struct MonitorLogEntry {
     LogLevel level;
     QDateTime timestamp;
     QString source;
-    QString category;
 
     MonitorLogEntry() : level(LogLevel::INFO) {}
     MonitorLogEntry(const QString& msg, LogLevel lvl, const QDateTime& ts,
-                    const QString& src = "", const QString& cat = "")
-        : message(msg), level(lvl), timestamp(ts), source(src), category(cat) {}
+                    const QString& src = "")
+        : message(msg), level(lvl), timestamp(ts), source(src) {}
 };
 
 class SystemMonitorThread : public BaseThread
@@ -34,7 +31,7 @@ class SystemMonitorThread : public BaseThread
     Q_OBJECT
 
 public:
-    explicit SystemMonitorThread(LogStorageEngine* storageEngine, QObject* parent = nullptr);
+    explicit SystemMonitorThread(QObject* parent = nullptr);
     ~SystemMonitorThread();
 
 public slots:
@@ -65,9 +62,6 @@ private:
     rclcpp::Subscription<rcl_interfaces::msg::Log>::SharedPtr m_rosoutAggSub;
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr m_collisionSub;
     rclcpp::Subscription<nav2_msgs::msg::BehaviorTreeLog>::SharedPtr m_behaviorTreeSub;
-
-    ThreadSafeQueue<MonitorLogEntry> m_logQueue;
-    LogStorageEngine* m_storageEngine;
 
     int m_processCount = 0;
 };

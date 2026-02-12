@@ -17,11 +17,10 @@ struct LogEntry {
     LogLevel level;
     QDateTime timestamp;
     QString source;
-    QString category;
 
     LogEntry() : level(LogLevel::INFO) {}
-    LogEntry(const QString& msg, LogLevel lvl, const QDateTime& ts, const QString& src = "", const QString& cat = "")
-        : message(msg), level(lvl), timestamp(ts), source(src), category(cat) {}
+    LogEntry(const QString& msg, LogLevel lvl, const QDateTime& ts, const QString& src = "")
+        : message(msg), level(lvl), timestamp(ts), source(src) {}
 };
 
 class LogThread : public BaseThread

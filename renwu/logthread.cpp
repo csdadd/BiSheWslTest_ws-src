@@ -91,7 +91,7 @@ void LogThread::cleanup()
 
 void LogThread::writeLog(const QString& message, LogLevel level)
 {
-    LogEntry entry(message, level, QDateTime::currentDateTime(), "Application", "User");
+    LogEntry entry(message, level, QDateTime::currentDateTime(), "Application");
     m_logQueue.enqueue(entry);
 }
 
@@ -103,33 +103,60 @@ void LogThread::writeLogEntry(const LogEntry& entry)
 void LogThread::processLogQueue()
 {
     QVector<StorageLogEntry> batchEntries;
+    QVector<StorageLogEntry> highFreqBatchEntries;
     LogEntry entry;
 
     while (m_logQueue.tryDequeue(entry, 0)) {
-        writeToFile(entry.message, entry.level, entry.timestamp, entry.source);
+        // 根据日志级别判断是否为高频日志
+        if (entry.level == LogLevel::HIGHFREQ) {
+            // 高频日志只写数据库，不写文件
+            StorageLogEntry storageEntry(
+                entry.message,
+                entry.level,
+                entry.timestamp,
+                entry.source
+            );
+            highFreqBatchEntries.append(storageEntry);
 
-        StorageLogEntry storageEntry(
-            entry.message,
-            entry.level,
-            entry.timestamp,
-            entry.source,
-            entry.category
-        );
-        batchEntries.append(storageEntry);
-
-        if (batchEntries.size() >= 100) {
-            if (m_storageEngine && m_storageEngine->isInitialized()) {
-                if (!m_storageEngine->insertLogs(batchEntries)) {
-                    qWarning() << "[LogThread] Failed to insert logs to database, will retry next cycle";
+            if (highFreqBatchEntries.size() >= 50) {
+                if (m_storageEngine && m_storageEngine->isInitialized()) {
+                    if (!m_storageEngine->insertHighFreqLogs(highFreqBatchEntries)) {
+                        qWarning() << "[LogThread] Failed to insert high freq logs to database, will retry next cycle";
+                    }
                 }
+                highFreqBatchEntries.clear();
             }
-            batchEntries.clear();
+        } else {
+            writeToFile(entry.message, entry.level, entry.timestamp, entry.source);
+
+            StorageLogEntry storageEntry(
+                entry.message,
+                entry.level,
+                entry.timestamp,
+                entry.source
+            );
+            batchEntries.append(storageEntry);
+
+            if (batchEntries.size() >= 100) {
+                if (m_storageEngine && m_storageEngine->isInitialized()) {
+                    if (!m_storageEngine->insertLogs(batchEntries)) {
+                        qWarning() << "[LogThread] Failed to insert logs to database, will retry next cycle";
+                    }
+                }
+                batchEntries.clear();
+            }
         }
     }
 
     if (!batchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
         if (!m_storageEngine->insertLogs(batchEntries)) {
             qWarning() << "[LogThread] Failed to insert remaining logs to database, will retry next cycle";
+        }
+    }
+
+    if (!highFreqBatchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
+        if (!m_storageEngine->insertHighFreqLogs(highFreqBatchEntries)) {
+            qWarning() << "[LogThread] Failed to insert remaining high freq logs to database, will retry next cycle";
         }
     }
 }

@@ -12,6 +12,7 @@
 #include "logtablemodel.h"
 #include "logfilterproxymodel.h"
 #include "logquerytask.h"
+#include "historylogmodel.h"
 #include "mapwidget.h"
 #include "mapcache.h"
 #include "nav2viewwidget.h"
@@ -80,6 +81,25 @@ private slots:
     void onClearLogByLevel();
     void onPauseLogToggled(bool checked);
 
+    // 历史日志槽函数
+    void onHistoryLogQuery();
+    void onHistoryLogQueryCompleted(const QVector<StorageLogEntry>& results);
+    void onHistoryLogQueryFailed(const QString& error);
+    void onHistoryLogPageLoaded(const QVector<StorageLogEntry>& results);
+    void onTodayButtonClicked();
+    void onYesterdayButtonClicked();
+    void onLast7DaysButtonClicked();
+    void onLast30DaysButtonClicked();
+    void onFirstPage();
+    void onPrevPage();
+    void onNextPage();
+    void onLastPage();
+    void onPageSizeChanged(const QString& pageSizeText);
+    void onExportHistoryLogs();
+    void onClearHistoryLogs();
+    void onSelectAllLevels();
+    void onDeselectAllLevels();
+
     // 地图相关槽函数
     void onMapClicked(double x, double y);
     void onLoadMapFromFile();
@@ -107,7 +127,7 @@ private slots:
     void onResetButtonClicked();
     void onDiscardButtonClicked();
     void onParameterRefreshed(bool success, const QString& message);
-    void onParameterApplied(bool success, const QString& message, const QStringList& appliedKeys);
+    void onParameterApplied(bool success, const QString& message, const QStringList& appliedKeys, const QStringList& failedKeys);
     void onParameterOperationFinished(const QString& operation, bool success, const QString& message);
     void onParameterValueChanged(double value);
 
@@ -117,9 +137,16 @@ private:
     void startAllThreads();
     void stopAllThreads();
     Q_INVOKABLE void refreshLogDisplay(bool autoScroll = true);
-    Q_INVOKABLE bool shouldDisplayLog(int level) const;
     void updateParameterValue(const QString& key, const QVariant& value);
     void addLogEntry(const LogEntry& entry);
+    void setParamSpinBoxColor(const QString& key, Nav2ParameterThread::ParamStatus status);
+
+    // 历史日志辅助函数
+    void loadHistoryPage(int page);
+    void updateHistoryLogStats();
+    QSet<int> getSelectedHistoryLogLevels() const;
+    LogLevel getMinLogLevel(const QSet<int>& levels) const;
+    bool exportHistoryLogs(const QString& filePath, bool isCsv);
 
 private:
     Ui::MainWindow *ui;
@@ -136,10 +163,32 @@ private:
     std::unique_ptr<SystemMonitorThread> m_systemMonitorThread;
     std::unique_ptr<LogThread> m_logThread;
     std::unique_ptr<LogStorageEngine> m_logStorage;
-    std::unique_ptr<LogTableModel> m_logTableModel;
-    std::unique_ptr<LogFilterProxyModel> m_logFilterProxyModel;
+    std::unique_ptr<LogTableModel> m_logTableModel;     // UI 显示层：QTableView 的数据源 (最大 1000 条)
+    std::unique_ptr<LogFilterProxyModel> m_logFilterProxyModel;  // 日志过滤代理模型
+
+    // 历史日志相关
+    std::unique_ptr<HistoryLogTableModel> m_historyLogTableModel;
+    std::unique_ptr<LogFilterProxyModel> m_historyLogFilterProxyModel;
+
+    // 查询条件缓存
+    QDateTime m_lastQueryStartTime;
+    QDateTime m_lastQueryEndTime;
+    LogLevel m_lastQueryMinLevel;
+    QString m_lastQuerySource;
+    QString m_lastQueryKeyword;
+    bool m_hasValidQuery = false;
+    // 内存中的完整日志缓存，用于日志管理和按级别清除等操作 (最大 10000 条)
+    // 设计目的：分离数据缓存层(m_allLogs)和显示层(m_logTableModel)，使得内存中保留更多历史日志，
+    //          而UI显示保持轻量，避免界面卡顿
+    // 注意：不包含高频日志(HIGHFREQ)，高频日志有独立缓存 m_highFreqLogs
     QList<LogEntry> m_allLogs;
     static constexpr int MAX_ALL_LOGS_SIZE = 10000;
+
+    // 高频日志独立缓存（最大 1,000 条）
+    // 设计目的：高频日志(如里程计数据)独立存储，不占用主日志缓存和 UI 显示资源
+    QList<LogEntry> m_highFreqLogs;
+    static constexpr int MAX_HIGHFREQ_LOGS_SIZE = 1000;
+
     bool m_logPaused = false;  // 日志接收暂停标志
     std::unique_ptr<Nav2ViewWidget> m_nav2ViewWidget;
     std::unique_ptr<Nav2ViewDataProcessor> m_nav2ViewProcessor;

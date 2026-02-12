@@ -18,15 +18,13 @@ struct StorageLogEntry {
     LogLevel level;
     QDateTime timestamp;
     QString source;
-    QString category;
     QString filePath;
     int lineNumber;
 
     StorageLogEntry() : level(LogLevel::INFO), lineNumber(0) {}
     StorageLogEntry(const QString& msg, LogLevel lvl, const QDateTime& ts,
-                     const QString& src = "", const QString& cat = "",
-                     const QString& file = "", int line = 0)
-        : message(msg), level(lvl), timestamp(ts), source(src), category(cat),
+                     const QString& src = "", const QString& file = "", int line = 0)
+        : message(msg), level(lvl), timestamp(ts), source(src),
           filePath(file), lineNumber(line) {}
 };
 
@@ -63,6 +61,19 @@ public:
     bool vacuum();
 
     QString getLastError() const;
+
+    // 高频日志相关方法
+    bool insertHighFreqLog(const StorageLogEntry& entry);
+    bool insertHighFreqLogs(const QVector<StorageLogEntry>& entries);
+
+    QVector<StorageLogEntry> queryHighFreqLogs(const QDateTime& startTime,
+                                                const QDateTime& endTime,
+                                                int limit = -1,
+                                                int offset = 0);
+    int getHighFreqLogCount(const QDateTime& startTime = QDateTime(),
+                            const QDateTime& endTime = QDateTime());
+
+    bool clearHighFreqLogs(const QDateTime& beforeTime = QDateTime());
 
 signals:
     void logInserted(int count);

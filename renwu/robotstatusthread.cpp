@@ -98,7 +98,7 @@ void RobotStatusThread::process()
         m_executor->spin_some();
     }
 
-    QString currentTime = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+    QString currentTime = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
     emit systemTimeReceived(currentTime);
 }
 
@@ -178,5 +178,5 @@ void RobotStatusThread::processTimeData(const sensor_msgs::msg::TimeReference::S
     refTime.setSecsSinceEpoch(msg->header.stamp.sec);
     refTime.setMSecsSinceEpoch(msg->header.stamp.nanosec / 1000000);
 
-    emit systemTimeReceived(refTime.toString("yyyy-MM-dd hh:mm:ss"));
+    emit systemTimeReceived(refTime.toString("yyyy-MM-dd HH:mm:ss"));
 }

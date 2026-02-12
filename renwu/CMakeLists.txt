@@ -62,6 +62,8 @@ set(PROJECT_SOURCES
         logstorageengine.cpp
         logquerytask.h
         logquerytask.cpp
+        historylogmodel.h
+        historylogmodel.cpp
         threadsafequeue.h
         mapconverter.h
         mapconverter.cpp
@@ -220,6 +222,8 @@ if(BUILD_TESTING)
         test/testnav2parameterthreadintegration.h
         test/testnav2viewwidget.cpp
         test/testnav2viewwidget.h
+        test/testhistorylogmodel.cpp
+        test/testhistorylogmodel.h
         mainwindow.cpp
         mainwindow.h
         mainwindow.ui
@@ -243,6 +247,8 @@ if(BUILD_TESTING)
         logstorageengine.cpp
         logquerytask.h
         logquerytask.cpp
+        historylogmodel.h
+        historylogmodel.cpp
         threadsafequeue.h
         mapconverter.h
         mapconverter.cpp

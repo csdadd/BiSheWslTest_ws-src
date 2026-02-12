@@ -56,7 +56,7 @@ void TestLogTableModel::testColumnCount()
 
 void TestLogTableModel::testData()
 {
-    LogEntry entry("Test message", LOG_INFO, QDateTime::currentDateTime(), "TestSource", "TestCategory");
+    LogEntry entry("Test message", LOG_INFO, QDateTime::currentDateTime(), "TestSource");
     m_model->addLogEntry(entry);
 
     QModelIndex index = m_model->index(0, 0);
@@ -115,7 +115,7 @@ void TestLogTableModel::testClearLogs()
 
 void TestLogTableModel::testGetLogEntry()
 {
-    LogEntry entry("Test message", LOG_INFO, QDateTime::currentDateTime(), "TestSource", "TestCategory");
+    LogEntry entry("Test message", LOG_INFO, QDateTime::currentDateTime(), "TestSource");
     m_model->addLogEntry(entry);
 
     LogEntry retrieved = m_model->getLogEntry(0);
@@ -199,7 +199,7 @@ void TestLogTableModel::testLevelToString()
 
 void TestLogTableModel::testConvertStorageEntry()
 {
-    StorageLogEntry storageEntry("Test message", LOG_INFO, QDateTime::currentDateTime(), "TestSource", "TestCategory");
+    StorageLogEntry storageEntry("Test message", LOG_INFO, QDateTime::currentDateTime(), "TestSource");
     m_storageEngine->insertLog(storageEntry);
 
     m_model->loadFromDatabase();

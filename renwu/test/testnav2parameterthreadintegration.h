@@ -72,6 +72,15 @@ private slots:
     void testFullWorkflowModifyResetApply();
     void testFullWorkflowModifyDiscard();
 
+    // 回读验证测试 (新增)
+    void testVerifyParameterValueAfterWrite();
+    void testVerifyArrayParameterAfterWrite();
+    void testVerifyDetectsMismatch();
+    void testVerifyAfterPartialFailure();
+
+    // 回滚机制测试 (新增)
+    void testMultiNodeRollback();
+
 private:
     Nav2ParameterThread* m_thread;
     QMap<QString, QVariant> m_initialValues;  // 保存初始值用于恢复

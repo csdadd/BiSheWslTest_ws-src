@@ -1,6 +1,9 @@
 #include "coordinatetransformer.h"
+#include "logutils.h"
 #include <QPointF>
 #include <QMetaType>
+#include <QSet>
+#include <QTextCodec>
 
 Q_DECLARE_METATYPE(CoordinateTransformer)
 
@@ -69,6 +72,37 @@ bool MainWindow::initialize()
     ui->logTableView->setColumnWidth(2, 120);
     ui->logTableView->horizontalHeader()->setStretchLastSection(true);
 
+    // 设置日志表格布局伸展，使表格能够随窗口缩放
+    //ui->gridLayout_2->setRowStretch(0, 0);  // 过滤器不伸展
+    //ui->gridLayout_2->setRowStretch(1, 1);  // 表格伸展
+
+    // 初始化历史日志模型
+    m_historyLogTableModel = std::make_unique<HistoryLogTableModel>(this);
+    m_historyLogFilterProxyModel = std::make_unique<LogFilterProxyModel>(this);
+    m_historyLogFilterProxyModel->setSourceModel(m_historyLogTableModel.get());
+    ui->historyLogTableView->setModel(m_historyLogFilterProxyModel.get());
+
+    ui->historyLogTableView->setColumnWidth(0, 180);
+    ui->historyLogTableView->setColumnWidth(1, 80);
+    ui->historyLogTableView->setColumnWidth(2, 120);
+    ui->historyLogTableView->horizontalHeader()->setStretchLastSection(true);
+
+    // 设置历史日志表格布局伸展，使表格能够随窗口缩放
+    //ui->historyLogsGridLayout->setRowStretch(0, 0);  // 查询条件不伸展
+    //ui->historyLogsGridLayout->setRowStretch(1, 0);  // 统计栏不伸展
+    //ui->historyLogsGridLayout->setRowStretch(2, 1);  // 表格伸展
+
+    // 设置历史日志时间范围默认值为前一天
+    ui->endDateTimeEdit->setDateTime(QDateTime::currentDateTime());
+    ui->startDateTimeEdit->setDateTime(QDateTime::currentDateTime().addDays(-1));
+
+    // 设置导航 tab 布局伸展，使地图区域能够随窗口缩放
+    //ui->navigationTabLayout->setStretch(0, 0);  // 控制面板区域不伸展
+    //ui->navigationTabLayout->setStretch(1, 1);  // 地图区域伸展
+
+    // 设置参数设置 tab 布局伸展，使组件能够随窗口缩放
+    //ui->settingsTabLayout->setStretch(0, 1);  // 参数区域伸展填充
+
     // 初始化 ROS2 上下文
     ROSContextManager::instance().initialize();
 
@@ -132,41 +166,46 @@ bool MainWindow::initialize()
         }
     }
 
+    // [测试模式] 注释登录功能，直接进入主界面
     // 检查登录状态，未登录则显示登录对话框
-    if (!m_userAuthManager->isLoggedIn()) {
-        qDebug() << "[MainWindow] 用户未登录，显示登录对话框";
-        int maxRetries = 3;
-        int retryCount = 0;
+    // if (!m_userAuthManager->isLoggedIn()) {
+    //     qDebug() << "[MainWindow] 用户未登录，显示登录对话框";
+    //     int maxRetries = 3;
+    //     int retryCount = 0;
+    //
+    //     while (retryCount < maxRetries) {
+    //         m_loginDialog->exec();
+    //
+    //         if (m_userAuthManager->isLoggedIn()) {
+    //             qDebug() << "[MainWindow] 登录成功:" << m_userAuthManager->getCurrentUsername();
+    //             break;
+    //         }
+    //
+    //         retryCount++;
+    //
+    //         if (retryCount >= maxRetries) {
+    //             qCritical() << "[MainWindow] 错误：登录失败次数过多";
+    //             return false;
+    //         }
+    //
+    //         QMessageBox::StandardButton reply = QMessageBox::question(
+    //             this,
+    //             tr("登录失败"),
+    //             tr("登录失败，是否重试？（剩余 %1 次）").arg(maxRetries - retryCount),
+    //             QMessageBox::Retry | QMessageBox::Cancel
+    //         );
+    //
+    //         if (reply == QMessageBox::Cancel) {
+    //             return false;
+    //         }
+    //     }
+    // } else {
+    //     qDebug() << "[MainWindow] 用户已登录:" << m_userAuthManager->getCurrentUsername();
+    // }
 
-        while (retryCount < maxRetries) {
-            m_loginDialog->exec();
-
-            if (m_userAuthManager->isLoggedIn()) {
-                qDebug() << "[MainWindow] 登录成功:" << m_userAuthManager->getCurrentUsername();
-                break;
-            }
-
-            retryCount++;
-
-            if (retryCount >= maxRetries) {
-                qCritical() << "[MainWindow] 错误：登录失败次数过多";
-                return false;
-            }
-
-            QMessageBox::StandardButton reply = QMessageBox::question(
-                this,
-                tr("登录失败"),
-                tr("登录失败，是否重试？（剩余 %1 次）").arg(maxRetries - retryCount),
-                QMessageBox::Retry | QMessageBox::Cancel
-            );
-
-            if (reply == QMessageBox::Cancel) {
-                return false;
-            }
-        }
-    } else {
-        qDebug() << "[MainWindow] 用户已登录:" << m_userAuthManager->getCurrentUsername();
-    }
+    // 测试模式：以管理员身份直接登录
+    m_userAuthManager->setTestAdminMode();
+    qDebug() << "[MainWindow] 测试模式：跳过登录，以管理员身份进入主界面";
 
     return true;
 }
@@ -196,7 +235,7 @@ void MainWindow::initializeThreads()
 
     m_robotStatusThread = std::make_unique<RobotStatusThread>(this);
     m_navStatusThread = std::make_unique<NavStatusThread>(this);
-    m_systemMonitorThread = std::make_unique<SystemMonitorThread>(m_logStorage.get(), this);
+    m_systemMonitorThread = std::make_unique<SystemMonitorThread>(this);
     m_logThread = std::make_unique<LogThread>(m_logStorage.get(), this);
     m_paramThread = std::make_unique<Nav2ParameterThread>(this);
 
@@ -248,14 +287,10 @@ void MainWindow::connectSignals()
     connect(m_systemMonitorThread.get(), &SystemMonitorThread::connectionStateChanged,
             this, &MainWindow::onConnectionStateChanged);
 
-    // SystemMonitorThread日志转发给LogThread
-    connect(m_systemMonitorThread.get(), &SystemMonitorThread::logMessage,
-            m_logThread.get(), &LogThread::writeLog);
-
-    // SystemMonitorThread日志接收后转发给LogThread
+    // SystemMonitorThread日志转发给LogThread统一存储
     connect(m_systemMonitorThread.get(), &SystemMonitorThread::logMessageReceived,
             m_logThread.get(), [this](const QString& message, int level, const QDateTime& timestamp) {
-        LogEntry entry(message, static_cast<LogLevel>(level), timestamp, "SystemMonitor", "ROS");
+        LogEntry entry(message, static_cast<LogLevel>(level), timestamp, "SystemMonitor");
         m_logThread->writeLogEntry(entry);
     });
 
@@ -302,10 +337,27 @@ void MainWindow::connectSignals()
     connect(ui->warningCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
     connect(ui->errorCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
     connect(ui->fatalCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->highFreqCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
 
     // 连接日志按钮信号
     connect(ui->clearLogButton, &QPushButton::clicked, this, &MainWindow::onClearLogByLevel);
     connect(ui->pauseLogButton, &QPushButton::toggled, this, &MainWindow::onPauseLogToggled);
+
+    // 连接历史日志相关信号
+    connect(ui->queryButton, &QPushButton::clicked, this, &MainWindow::onHistoryLogQuery);
+    connect(ui->todayButton, &QPushButton::clicked, this, &MainWindow::onTodayButtonClicked);
+    connect(ui->yesterdayButton, &QPushButton::clicked, this, &MainWindow::onYesterdayButtonClicked);
+    connect(ui->last7DaysButton, &QPushButton::clicked, this, &MainWindow::onLast7DaysButtonClicked);
+    connect(ui->last30DaysButton, &QPushButton::clicked, this, &MainWindow::onLast30DaysButtonClicked);
+    connect(ui->firstPageButton, &QPushButton::clicked, this, &MainWindow::onFirstPage);
+    connect(ui->prevPageButton, &QPushButton::clicked, this, &MainWindow::onPrevPage);
+    connect(ui->nextPageButton, &QPushButton::clicked, this, &MainWindow::onNextPage);
+    connect(ui->lastPageButton, &QPushButton::clicked, this, &MainWindow::onLastPage);
+    connect(ui->pageSizeComboBox, &QComboBox::currentTextChanged, this, &MainWindow::onPageSizeChanged);
+    connect(ui->exportButton, &QPushButton::clicked, this, &MainWindow::onExportHistoryLogs);
+    connect(ui->clearHistoryButton, &QPushButton::clicked, this, &MainWindow::onClearHistoryLogs);
+    connect(ui->selectAllLevelsButton, &QPushButton::clicked, this, &MainWindow::onSelectAllLevels);
+    connect(ui->deselectAllLevelsButton, &QPushButton::clicked, this, &MainWindow::onDeselectAllLevels);
 
     // 连接按钮信号
     connect(ui->btnStartNavigation, &QPushButton::clicked, this, &MainWindow::onStartNavigation);
@@ -529,7 +581,7 @@ void MainWindow::onBatteryStatusReceived(float voltage, float percentage)
     }
 
     QString message = QString("电池状态 - 电压: %1 V, 电量: %2%").arg(voltage, 0, 'f', 2).arg(percentage, 0, 'f', 1);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "RobotStatus", "Battery");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "RobotStatus");
     addLogEntry(entry);
 }
 
@@ -542,7 +594,7 @@ void MainWindow::onPositionReceived(double x, double y, double yaw)
     ui->labelYaw->setText(QString("%1 °").arg(yaw_degrees, 0, 'f', 1));
 
     QString message = QString("位置信息 - X: %1, Y: %2, Yaw: %3").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "RobotStatus", "Position");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "RobotStatus");
     addLogEntry(entry);
 }
 
@@ -563,13 +615,18 @@ void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, d
     QString message = QString("里程计 - 位置(X:%1, Y:%2, Yaw:%3), 速度(vx:%4, vy:%5, omega:%6)")
         .arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2)
         .arg(vx, 0, 'f', 2).arg(vy, 0, 'f', 2).arg(omega, 0, 'f', 2);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "RobotStatus", "Odometry");
+    LogEntry entry(message, LogLevel::HIGHFREQ, QDateTime::currentDateTime(), "RobotStatus");
     addLogEntry(entry);
 }
 
 void MainWindow::onSystemTimeReceived(const QString& time)
 {
-    ui->labelCurrentTime->setText(time);
+    QStringList parts = time.split(' ');
+    if (parts.size() == 2) {
+        ui->labelCurrentTime->setText(parts[0] + "\n" + parts[1]);
+    } else {
+        ui->labelCurrentTime->setText(time);
+    }
     ui->statusbar->showMessage(QString("系统时间: %1").arg(time));
 }
 
@@ -581,8 +638,15 @@ void MainWindow::onDiagnosticsReceived(const QString& status, int level, const Q
     else if (level == 3) logLevel = LogLevel::FATAL;
     else if (level == 4) logLevel = LogLevel::DEBUG;
 
-    QString logMessage = QString("诊断信息 - 状态: %1, 消息: %2").arg(status).arg(message);
-    LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "RobotStatus", "Diagnostics");
+    // 去掉状态名中的 ": Nav2 Health" 后缀，使格式更简洁
+    QString simplifiedStatus = status;
+    if (status.contains(": Nav2 Health")) {
+        simplifiedStatus = status.left(status.indexOf(": Nav2 Health"));
+    }
+
+    // 将诊断信息格式化为 "消息 from 状态名 [/diagnostics]" 的形式
+    QString logMessage = QString("%1 from %2 [/diagnostics]").arg(message).arg(simplifiedStatus);
+    LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "RobotStatus");
     addLogEntry(entry);
 
     if (level >= 2) {
@@ -605,7 +669,7 @@ void MainWindow::onNavigationStatusReceived(int status, const QString& message)
     }
 
     QString logMessage = QString("导航状态 - %1: %2").arg(statusStr).arg(message);
-    LogEntry entry(logMessage, LogLevel::INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
+    LogEntry entry(logMessage, LogLevel::INFO, QDateTime::currentDateTime(), "NavStatus");
     addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("导航: %1 - %2").arg(statusStr).arg(message), 3000);
@@ -614,7 +678,7 @@ void MainWindow::onNavigationStatusReceived(int status, const QString& message)
 void MainWindow::onNavigationPathReceived(const QVector<QPointF>& path)
 {
     QString message = QString("导航路径 - 路径点数: %1").arg(path.size());
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "NavStatus", "Navigation");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "NavStatus");
     addLogEntry(entry);
 
     // Nav2ViewWidget 内部订阅 /plan 话题处理路径显示
@@ -624,14 +688,14 @@ void MainWindow::onNavigationPathReceived(const QVector<QPointF>& path)
 
 void MainWindow::onLogMessageReceived(const QString& message, int level, const QDateTime& timestamp)
 {
-    LogEntry entry(message, static_cast<LogLevel>(level), timestamp, "SystemMonitor", "ROS");
+    LogEntry entry(message, static_cast<LogLevel>(level), timestamp, "SystemMonitor");
     addLogEntry(entry);
 }
 
 void MainWindow::onCollisionDetected(const QString& message)
 {
     QString logMessage = QString("碰撞检测 - %1").arg(message);
-    LogEntry entry(logMessage, LogLevel::ERROR, QDateTime::currentDateTime(), "SystemMonitor", "Collision");
+    LogEntry entry(logMessage, LogLevel::ERROR, QDateTime::currentDateTime(), "SystemMonitor");
     addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("警告: %1").arg(message), 5000);
@@ -640,7 +704,7 @@ void MainWindow::onCollisionDetected(const QString& message)
 void MainWindow::onAnomalyDetected(const QString& message)
 {
     QString logMessage = QString("异常检测 - %1").arg(message);
-    LogEntry entry(logMessage, LogLevel::WARNING, QDateTime::currentDateTime(), "SystemMonitor", "Anomaly");
+    LogEntry entry(logMessage, LogLevel::WARNING, QDateTime::currentDateTime(), "SystemMonitor");
     addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("异常: %1").arg(message), 5000);
@@ -649,7 +713,7 @@ void MainWindow::onAnomalyDetected(const QString& message)
 void MainWindow::onBehaviorTreeLogReceived(const QString& log)
 {
     QString message = QString("行为树日志 - %1").arg(log);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "SystemMonitor", "BehaviorTree");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "SystemMonitor");
     addLogEntry(entry);
 }
 
@@ -658,7 +722,7 @@ void MainWindow::onBehaviorTreeLogReceived(const QString& log)
 void MainWindow::onLogFileChanged(const QString& filePath)
 {
     QString message = QString("日志文件变更 - 新文件: %1").arg(filePath);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "LogThread", "File");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "LogThread");
     addLogEntry(entry);
 }
 
@@ -671,21 +735,21 @@ void MainWindow::onConnectionStateChanged(bool connected)
 
     QString message = QString("连接状态变更 - %1").arg(status);
     LogLevel logLevel = connected ? LogLevel::INFO : LogLevel::WARNING;
-    LogEntry entry(message, logLevel, QDateTime::currentDateTime(), "System", "Connection");
+    LogEntry entry(message, logLevel, QDateTime::currentDateTime(), "System");
     addLogEntry(entry);
 }
 
 void MainWindow::onThreadStarted(const QString& threadName)
 {
     QString message = QString("线程启动 - %1").arg(threadName);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "System", "Thread");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "System");
     addLogEntry(entry);
 }
 
 void MainWindow::onThreadStopped(const QString& threadName)
 {
     QString message = QString("线程停止 - %1").arg(threadName);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "System", "Thread");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "System");
     addLogEntry(entry);
 }
 
@@ -714,24 +778,13 @@ void MainWindow::refreshLogDisplay(bool autoScroll)
     if (ui->warningCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::WARNING);
     if (ui->errorCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::ERROR);
     if (ui->fatalCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::FATAL);
+    if (ui->highFreqCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::HIGHFREQ);
 
     // 使用LogFilterProxyModel的过滤功能，避免重建模型
     m_logFilterProxyModel->setLogLevelFilter(enabledLevels);
 
     if (autoScroll) {
         ui->logTableView->scrollToBottom();
-    }
-}
-
-bool MainWindow::shouldDisplayLog(int level) const
-{
-    switch (static_cast<LogLevel>(level)) {
-        case LogLevel::DEBUG:   return ui->debugCheckBox->isChecked();
-        case LogLevel::INFO:    return ui->infoCheckBox->isChecked();
-        case LogLevel::WARNING: return ui->warningCheckBox->isChecked();
-        case LogLevel::ERROR:   return ui->errorCheckBox->isChecked();
-        case LogLevel::FATAL:   return ui->fatalCheckBox->isChecked();
-        default:                return false;
     }
 }
 
@@ -751,9 +804,12 @@ void MainWindow::onClearLogByLevel()
     if (ui->warningCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::WARNING);
     if (ui->errorCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::ERROR);
     if (ui->fatalCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::FATAL);
+    if (ui->highFreqCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::HIGHFREQ);
 
     // 从内存中清除对应级别的日志（仅影响显示，不影响数据库和文件中的日志）
     int clearedCount = 0;
+
+    // 清除普通日志缓存
     for (auto it = m_allLogs.begin(); it != m_allLogs.end(); ) {
         if (levelsToClear.contains(static_cast<int>(it->level))) {
             it = m_allLogs.erase(it);
@@ -761,6 +817,12 @@ void MainWindow::onClearLogByLevel()
         } else {
             ++it;
         }
+    }
+
+    // 清除高频日志缓存
+    if (levelsToClear.contains(static_cast<int>(LogLevel::HIGHFREQ))) {
+        clearedCount += m_highFreqLogs.size();
+        m_highFreqLogs.clear();
     }
 
     // 刷新模型显示
@@ -812,7 +874,7 @@ void MainWindow::onMapClicked(double x, double y)
     ui->labelTargetPosition->setText(QString("(%1, %2)").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2));
 
     QString message = QString("地图点击位置: (%1, %2) - 已设置为导航目标").arg(x, 0, 'f', 2).arg(y, 0, 'f', 2);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Map", "Click");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Map");
     addLogEntry(entry);
 }
 
@@ -872,7 +934,7 @@ void MainWindow::onLoadMapFromFile()
     ui->nav2MapLayout->addWidget(m_nav2ViewWidget.get());
 
     QString message = QString("地图文件加载成功 - 文件: %1").arg(filePath);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Map", "FileLoad");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Map");
     addLogEntry(entry);
 
     ui->statusbar->showMessage(QString("地图已加载: %1").arg(QFileInfo(filePath).fileName()), 3000);
@@ -1029,7 +1091,7 @@ void MainWindow::onNavigationFeedback(double distanceRemaining, double navigatio
         .arg(navigationTime, 0, 'f', 1)
         .arg(recoveries)
         .arg(estTimeStr);
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation", "Feedback");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation");
     addLogEntry(entry);
 }
 
@@ -1057,7 +1119,7 @@ void MainWindow::onNavigationResult(bool success, const QString& message)
 
     QString logMessage = QString("导航结果 - %1: %2").arg(success ? tr("成功") : tr("失败")).arg(message);
     LogLevel logLevel = success ? LogLevel::INFO : LogLevel::WARNING;
-    LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "Navigation", "Result");
+    LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "Navigation");
     addLogEntry(entry);
 }
 
@@ -1071,7 +1133,7 @@ void MainWindow::onGoalAccepted()
     m_initialDistance = 0.0;
 
     QString message = "导航目标已被接受，开始导航";
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation");
     addLogEntry(entry);
     ui->statusbar->showMessage(message, 3000);
 }
@@ -1083,7 +1145,7 @@ void MainWindow::onGoalRejected(const QString& reason)
     ui->labelNavigationStatus->setStyleSheet("color: orange;");
 
     QString message = QString("导航目标被拒绝 - 原因: %1").arg(reason);
-    LogEntry entry(message, LogLevel::WARNING, QDateTime::currentDateTime(), "Navigation", "Goal");
+    LogEntry entry(message, LogLevel::WARNING, QDateTime::currentDateTime(), "Navigation");
     addLogEntry(entry);
 }
 
@@ -1094,14 +1156,16 @@ void MainWindow::onGoalCanceled()
     ui->labelNavigationStatus->setStyleSheet("color: gray;");
 
     QString message = "导航目标已取消";
-    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation", "Goal");
+    LogEntry entry(message, LogLevel::INFO, QDateTime::currentDateTime(), "Navigation");
     addLogEntry(entry);
 }
 
 void MainWindow::updateCurrentTime()
 {
-    QString currentTime = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
-    ui->labelCurrentTime->setText(currentTime);
+    QDateTime now = QDateTime::currentDateTime();
+    QString dateStr = now.toString("yyyy-MM-dd");
+    QString timeStr = now.toString("HH:mm:ss");
+    ui->labelCurrentTime->setText(dateStr + "\n" + timeStr);
 
     qint64 uptimeSec = m_startTime.secsTo(QDateTime::currentDateTime());
     int hours = uptimeSec / 3600;
@@ -1329,6 +1393,13 @@ void MainWindow::updateUIBasedOnPermission()
         ui->clearLogButton->setEnabled(canOperate);
         ui->pauseLogButton->setEnabled(canOperate);
 
+        // 历史日志控件权限
+        bool canView = m_userAuthManager->canView();
+        ui->queryButton->setEnabled(canView);
+        ui->exportButton->setEnabled(canOperate);
+        ui->clearHistoryButton->setEnabled(canAdmin);
+        ui->clearHistoryButton->setVisible(canAdmin);
+
         // 同步权限到 Nav2ViewWidget
         if (m_nav2ViewWidget) {
             m_nav2ViewWidget->setOperatePermission(canOperate);
@@ -1387,9 +1458,11 @@ void MainWindow::onRefreshButtonClicked()
         ui->refreshButton->setEnabled(false);
     } catch (const std::exception& e) {
         qCritical() << "[MainWindow] onRefreshButtonClicked 发生异常:" << e.what();
+        ui->refreshButton->setEnabled(true);  // 异常时恢复按钮
         QMessageBox::critical(this, tr("错误"), tr("刷新参数时发生错误:\n%1").arg(e.what()));
     } catch (...) {
         qCritical() << "[MainWindow] onRefreshButtonClicked 发生未知异常";
+        ui->refreshButton->setEnabled(true);  // 异常时恢复按钮
         QMessageBox::critical(this, tr("错误"), tr("刷新参数时发生未知错误"));
     }
 }
@@ -1426,9 +1499,11 @@ void MainWindow::onApplyButtonClicked()
         }
     } catch (const std::exception& e) {
         qCritical() << "[MainWindow] onApplyButtonClicked 发生异常:" << e.what();
+        ui->applyButton->setEnabled(true);  // 异常时恢复按钮
         QMessageBox::critical(this, tr("错误"), tr("应用参数时发生错误:\n%1").arg(e.what()));
     } catch (...) {
         qCritical() << "[MainWindow] onApplyButtonClicked 发生未知异常";
+        ui->applyButton->setEnabled(true);  // 异常时恢复按钮
         QMessageBox::critical(this, tr("错误"), tr("应用参数时发生未知错误"));
     }
 }
@@ -1499,19 +1574,25 @@ void MainWindow::onDiscardButtonClicked()
 
 void MainWindow::onParameterRefreshed(bool success, const QString& message)
 {
-    try {
-        ui->statusLabel->setText(message);
-        ui->refreshButton->setEnabled(true);
+    // 无论成功或失败，都要恢复按钮状态
+    ui->statusLabel->setText(message);
+    ui->refreshButton->setEnabled(true);
 
-        if (success) {
-            ui->statusLabel->setStyleSheet("color: green;");
-            // 更新所有参数控件显示
-            if (m_paramThread) {
-                auto params = m_paramThread->getAllParams();
-                for (auto it = params.begin(); it != params.end(); ++it) {
+    try {
+        // 无论成功或失败，都重置所有参数控件的颜色为默认
+        if (m_paramThread) {
+            auto params = m_paramThread->getAllParams();
+            for (auto it = params.begin(); it != params.end(); ++it) {
+                setParamSpinBoxColor(it.key(), Nav2ParameterThread::ParamStatus::Default);
+                // 只有成功时才更新参数值
+                if (success) {
                     updateParameterValue(it.key(), it.value().currentValue);
                 }
             }
+        }
+
+        if (success) {
+            ui->statusLabel->setStyleSheet("color: green;");
         } else {
             ui->statusLabel->setStyleSheet("color: red;");
         }
@@ -1527,30 +1608,49 @@ void MainWindow::onParameterRefreshed(bool success, const QString& message)
     }
 }
 
-void MainWindow::onParameterApplied(bool success, const QString& message, const QStringList& appliedKeys)
+void MainWindow::onParameterApplied(bool success, const QString& message, const QStringList& appliedKeys, const QStringList& failedKeys)
 {
-    try {
-        ui->statusLabel->setText(message);
-        ui->applyButton->setEnabled(true);
+    // 无论成功或失败，都要恢复按钮状态
+    ui->statusLabel->setText(message);
+    ui->applyButton->setEnabled(true);
 
+    try {
         if (success) {
             ui->statusLabel->setStyleSheet("color: green;");
-            // 更新已应用的参数控件显示
+            // 更新已应用的参数控件显示并设置绿色
             if (m_paramThread) {
                 for (const QString& key : appliedKeys) {
                     Nav2ParameterThread::ParamInfo info;
                     if (m_paramThread->getParamInfo(key, info)) {
                         updateParameterValue(key, info.currentValue);
+                        setParamSpinBoxColor(key, Nav2ParameterThread::ParamStatus::Success);
                     }
                 }
             }
         } else {
             ui->statusLabel->setStyleSheet("color: red;");
+            // 为失败的参数设置红色
+            if (m_paramThread) {
+                for (const QString& key : failedKeys) {
+                    setParamSpinBoxColor(key, Nav2ParameterThread::ParamStatus::Failed);
+                }
+                // 为成功的参数也设置绿色
+                for (const QString& key : appliedKeys) {
+                    setParamSpinBoxColor(key, Nav2ParameterThread::ParamStatus::Success);
+                }
+            }
         }
 
         QTimer::singleShot(3000, this, [this]() {
             ui->statusLabel->setText(tr("就绪"));
             ui->statusLabel->setStyleSheet("");
+            // 3秒后重置所有颜色为默认
+            if (m_paramThread) {
+                auto params = m_paramThread->getAllParams();
+                for (auto it = params.begin(); it != params.end(); ++it) {
+                    setParamSpinBoxColor(it.key(), Nav2ParameterThread::ParamStatus::Default);
+                }
+            }
         });
     } catch (const std::exception& e) {
         qCritical() << "[MainWindow] onParameterApplied 发生异常:" << e.what();
@@ -1598,7 +1698,6 @@ void MainWindow::onParameterValueChanged(double value)
         if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
             // 恢复为原值
             QString key = spinBox->objectName();
-            key.replace("SpinBox", "");
             if (m_paramThread) {
                 Nav2ParameterThread::ParamInfo info;
                 if (m_paramThread->getParamInfo(key, info)) {
@@ -1617,10 +1716,10 @@ void MainWindow::onParameterValueChanged(double value)
         }
 
         QString key = spinBox->objectName();
-        // 将控件名转换为参数 key
-        key.replace("SpinBox", "");
-
+        // 控件名直接作为参数 key（不需要转换）
         m_paramThread->setPendingValue(key, value);
+        // 设置待应用颜色（蓝色）
+        setParamSpinBoxColor(key, Nav2ParameterThread::ParamStatus::Pending);
     } catch (const std::exception& e) {
         qCritical() << "[MainWindow] onParameterValueChanged 发生异常:" << e.what();
     } catch (...) {
@@ -1631,8 +1730,8 @@ void MainWindow::onParameterValueChanged(double value)
 void MainWindow::updateParameterValue(const QString& key, const QVariant& value)
 {
     try {
-        QString objectName = key + "SpinBox";
-        QDoubleSpinBox* spinBox = findChild<QDoubleSpinBox*>(objectName);
+        // key 本身就是控件名（如 "robotRadiusSpinBox"）
+        QDoubleSpinBox* spinBox = findChild<QDoubleSpinBox*>(key);
         if (spinBox) {
             spinBox->setValue(value.toDouble());
         }
@@ -1650,16 +1749,26 @@ void MainWindow::addLogEntry(const LogEntry& entry)
         return;
     }
 
+    // 高频日志：独立存储，不进入主日志流
+    if (entry.level == LogLevel::HIGHFREQ) {
+        m_highFreqLogs.append(entry);
+        if (m_highFreqLogs.size() > MAX_HIGHFREQ_LOGS_SIZE) {
+            m_highFreqLogs.removeFirst();
+        }
+        return;
+    }
+
+    // 普通日志：添加到内存缓存 (最大 10000 条，用于日志管理操作)
     m_allLogs.append(entry);
 
     if (m_allLogs.size() > MAX_ALL_LOGS_SIZE) {
         int removeCount = m_allLogs.size() - MAX_ALL_LOGS_SIZE;
         for (int i = 0; i < removeCount; ++i) {
-            m_allLogs.removeFirst();
+            m_allLogs.removeFirst();  // FIFO 删除旧日志
         }
     }
 
-    // 直接添加到模型，由LogFilterProxyModel负责过滤显示
+    // 添加到 UI 显示层 (LogTableModel 内部最大 1000 条，保持轻量避免卡顿)
     m_logTableModel->addLogEntry(entry);
     ui->logTableView->scrollToBottom();
 }
@@ -1675,4 +1784,381 @@ QString MainWindow::getMapPathFromRosParam(rclcpp::Node::SharedPtr node)
                "/wheeltec_ros2/src/renwu/map/DisplaySimulationMap.yaml";
     }
     return QString::fromStdString(map_path);
+}
+
+// ==================== 历史日志槽函数 ====================
+
+void MainWindow::onHistoryLogQuery()
+{
+    if (!m_userAuthManager || !m_userAuthManager->canView()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要查看者或更高权限才能查询历史日志。"));
+        return;
+    }
+
+    QDateTime startTime = ui->startDateTimeEdit->dateTime();
+    QDateTime endTime = ui->endDateTimeEdit->dateTime();
+
+    if (startTime > endTime) {
+        QMessageBox::warning(this, tr("参数错误"), tr("起始时间不能晚于结束时间"));
+        return;
+    }
+
+    QSet<int> levels = getSelectedHistoryLogLevels();
+    if (levels.isEmpty()) {
+        QMessageBox::warning(this, tr("参数错误"), tr("请至少选择一个日志级别"));
+        return;
+    }
+
+    LogLevel minLevel = getMinLogLevel(levels);
+    QString source = ui->sourceComboBox->currentText();
+    if (source == "全部") source.clear();
+    QString keyword = ui->keywordLineEdit->text();
+    int pageSize = ui->pageSizeComboBox->currentText().toInt();
+
+    m_lastQueryStartTime = startTime;
+    m_lastQueryEndTime = endTime;
+    m_lastQueryMinLevel = minLevel;
+    m_lastQuerySource = source;
+    m_lastQueryKeyword = keyword;
+    m_hasValidQuery = true;
+
+    ui->queryButton->setEnabled(false);
+    ui->queryButton->setText(tr("查询中..."));
+
+    auto* task = new LogQueryTask(m_logStorage.get(),
+        startTime, endTime, minLevel, source, keyword, pageSize, 0, this);
+    connect(task, &LogQueryTask::queryCompleted,
+            this, &MainWindow::onHistoryLogQueryCompleted);
+    connect(task, &LogQueryTask::queryFailed,
+            this, &MainWindow::onHistoryLogQueryFailed);
+    QThreadPool::globalInstance()->start(task);
+}
+
+void MainWindow::onHistoryLogQueryCompleted(const QVector<StorageLogEntry>& results)
+{
+    int totalCount = m_logStorage->getLogCount(m_lastQueryStartTime,
+        m_lastQueryEndTime, m_lastQueryMinLevel);
+
+    m_historyLogTableModel->setQueryResults(results);
+    m_historyLogTableModel->setPaginationInfo(totalCount, 1, ui->pageSizeComboBox->currentText().toInt());
+
+    updateHistoryLogStats();
+
+    ui->queryButton->setEnabled(true);
+    ui->queryButton->setText(tr("查询"));
+
+    qDebug() << "[MainWindow] 历史日志查询完成，找到" << totalCount << "条记录";
+}
+
+void MainWindow::onHistoryLogQueryFailed(const QString& error)
+{
+    QMessageBox::critical(this, tr("查询失败"), tr("查询历史日志失败:\n%1").arg(error));
+
+    ui->queryButton->setEnabled(true);
+    ui->queryButton->setText(tr("查询"));
+
+    qWarning() << "[MainWindow] 历史日志查询失败:" << error;
+}
+
+void MainWindow::onHistoryLogPageLoaded(const QVector<StorageLogEntry>& results)
+{
+    m_historyLogTableModel->setQueryResults(results);
+    updateHistoryLogStats();
+
+    qDebug() << "[MainWindow] 历史日志分页加载完成，当前页" << m_historyLogTableModel->getCurrentPage();
+}
+
+void MainWindow::loadHistoryPage(int page)
+{
+    if (!m_hasValidQuery) {
+        QMessageBox::information(this, tr("提示"), tr("请先执行查询操作"));
+        return;
+    }
+
+    int totalPages = m_historyLogTableModel->getTotalPages();
+    if (page < 1 || page > totalPages) {
+        return;
+    }
+
+    int pageSize = ui->pageSizeComboBox->currentText().toInt();
+    int offset = (page - 1) * pageSize;
+
+    auto* task = new LogQueryTask(m_logStorage.get(),
+        m_lastQueryStartTime, m_lastQueryEndTime, m_lastQueryMinLevel,
+        m_lastQuerySource, m_lastQueryKeyword, pageSize, offset, this);
+    connect(task, &LogQueryTask::queryCompleted,
+            this, &MainWindow::onHistoryLogPageLoaded);
+    connect(task, &LogQueryTask::queryFailed,
+            this, &MainWindow::onHistoryLogQueryFailed);
+    QThreadPool::globalInstance()->start(task);
+}
+
+void MainWindow::updateHistoryLogStats()
+{
+    int totalCount = m_historyLogTableModel->getTotalCount();
+    int currentPage = m_historyLogTableModel->getCurrentPage();
+    int totalPages = m_historyLogTableModel->getTotalPages();
+
+    ui->totalCountLabel->setText(tr("总记录数: %1").arg(totalCount));
+    ui->pageInfoLabel->setText(tr("当前页: %1/%2").arg(currentPage).arg(totalPages));
+
+    ui->firstPageButton->setEnabled(currentPage > 1);
+    ui->prevPageButton->setEnabled(currentPage > 1);
+    ui->nextPageButton->setEnabled(currentPage < totalPages);
+    ui->lastPageButton->setEnabled(currentPage < totalPages);
+}
+
+QSet<int> MainWindow::getSelectedHistoryLogLevels() const
+{
+    QSet<int> levels;
+    if (ui->historyDebugCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::DEBUG));
+    if (ui->historyInfoCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::INFO));
+    if (ui->historyWarningCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::WARNING));
+    if (ui->historyErrorCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::ERROR));
+    if (ui->historyFatalCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::FATAL));
+    if (ui->historyHighFreqCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::HIGHFREQ));
+    return levels;
+}
+
+LogLevel MainWindow::getMinLogLevel(const QSet<int>& levels) const
+{
+    if (levels.contains(static_cast<int>(LogLevel::DEBUG))) return LogLevel::DEBUG;
+    if (levels.contains(static_cast<int>(LogLevel::INFO))) return LogLevel::INFO;
+    if (levels.contains(static_cast<int>(LogLevel::WARNING))) return LogLevel::WARNING;
+    if (levels.contains(static_cast<int>(LogLevel::ERROR))) return LogLevel::ERROR;
+    if (levels.contains(static_cast<int>(LogLevel::FATAL))) return LogLevel::FATAL;
+    if (levels.contains(static_cast<int>(LogLevel::HIGHFREQ))) return LogLevel::HIGHFREQ;
+    return LogLevel::INFO;
+}
+
+void MainWindow::onTodayButtonClicked()
+{
+    QDateTime now = QDateTime::currentDateTime();
+    ui->endDateTimeEdit->setDateTime(now);
+    ui->startDateTimeEdit->setDateTime(QDateTime(now.date(), QTime(0, 0, 0)));
+}
+
+void MainWindow::onYesterdayButtonClicked()
+{
+    QDateTime yesterday = QDateTime::currentDateTime().addDays(-1);
+    ui->endDateTimeEdit->setDateTime(QDateTime(yesterday.date(), QTime(23, 59, 59)));
+    ui->startDateTimeEdit->setDateTime(QDateTime(yesterday.date(), QTime(0, 0, 0)));
+}
+
+void MainWindow::onLast7DaysButtonClicked()
+{
+    QDateTime now = QDateTime::currentDateTime();
+    ui->endDateTimeEdit->setDateTime(now);
+    ui->startDateTimeEdit->setDateTime(now.addDays(-7));
+}
+
+void MainWindow::onLast30DaysButtonClicked()
+{
+    QDateTime now = QDateTime::currentDateTime();
+    ui->endDateTimeEdit->setDateTime(now);
+    ui->startDateTimeEdit->setDateTime(now.addDays(-30));
+}
+
+void MainWindow::onFirstPage()
+{
+    loadHistoryPage(1);
+}
+
+void MainWindow::onPrevPage()
+{
+    int currentPage = m_historyLogTableModel->getCurrentPage();
+    if (currentPage > 1) {
+        loadHistoryPage(currentPage - 1);
+    }
+}
+
+void MainWindow::onNextPage()
+{
+    int currentPage = m_historyLogTableModel->getCurrentPage();
+    int totalPages = m_historyLogTableModel->getTotalPages();
+    if (currentPage < totalPages) {
+        loadHistoryPage(currentPage + 1);
+    }
+}
+
+void MainWindow::onLastPage()
+{
+    int totalPages = m_historyLogTableModel->getTotalPages();
+    if (totalPages > 0) {
+        loadHistoryPage(totalPages);
+    }
+}
+
+void MainWindow::onPageSizeChanged(const QString& pageSizeText)
+{
+    Q_UNUSED(pageSizeText);
+    if (m_hasValidQuery) {
+        loadHistoryPage(1);
+    }
+}
+
+void MainWindow::onExportHistoryLogs()
+{
+    if (!m_userAuthManager || !m_userAuthManager->canOperate()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要操作员或管理员权限才能导出历史日志。"));
+        return;
+    }
+
+    if (!m_hasValidQuery) {
+        QMessageBox::information(this, tr("提示"), tr("请先执行查询操作"));
+        return;
+    }
+
+    QString fileName = QFileDialog::getSaveFileName(this, tr("导出历史日志"),
+        QString("history_logs_%1.csv").arg(QDateTime::currentDateTime().toString("yyyyMMdd_hhmmss")),
+        tr("CSV 文件 (*.csv);;文本文件 (*.txt)"));
+
+    if (fileName.isEmpty()) {
+        return;
+    }
+
+    bool isCsv = fileName.endsWith(".csv", Qt::CaseInsensitive);
+
+    if (exportHistoryLogs(fileName, isCsv)) {
+        QMessageBox::information(this, tr("导出成功"),
+            tr("历史日志已成功导出到:\n%1").arg(fileName));
+    } else {
+        QMessageBox::critical(this, tr("导出失败"),
+            tr("导出历史日志失败，请检查文件路径和权限。"));
+    }
+}
+
+bool MainWindow::exportHistoryLogs(const QString& filePath, bool isCsv)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qWarning() << "[MainWindow] 无法打开导出文件:" << filePath;
+        return false;
+    }
+
+    QTextStream out(&file);
+    out.setCodec(QTextCodec::codecForName("UTF-8"));
+
+    if (isCsv) {
+        out << "\xEF\xBB\xBF";
+        out << "时间,级别,来源,消息\n";
+
+        int totalCount = m_historyLogTableModel->getTotalCount();
+        int pageSize = 500;
+        for (int offset = 0; offset < totalCount; offset += pageSize) {
+            QVector<StorageLogEntry> entries = m_logStorage->queryLogs(
+                m_lastQueryStartTime, m_lastQueryEndTime, m_lastQueryMinLevel,
+                m_lastQuerySource, m_lastQueryKeyword, pageSize, offset);
+
+            for (const auto& entry : entries) {
+                QString msg = entry.message;
+                msg.replace("\"", "\"\"");
+                out << "\"" << entry.timestamp.toString("yyyy-MM-dd hh:mm:ss.zzz") << "\","
+                    << "\"" << LogUtils::levelToString(entry.level) << "\","
+                    << "\"" << (entry.source.isEmpty() ? "系统" : entry.source) << "\","
+                    << "\"" << msg << "\"\n";
+            }
+        }
+    } else {
+        out << "历史日志导出\n";
+        out << "时间范围: " << m_lastQueryStartTime.toString("yyyy-MM-dd hh:mm:ss")
+            << " 至 " << m_lastQueryEndTime.toString("yyyy-MM-dd hh:mm:ss") << "\n";
+        out << "最低级别: " << LogUtils::levelToString(m_lastQueryMinLevel) << "\n";
+        if (!m_lastQuerySource.isEmpty()) {
+            out << "来源: " << m_lastQuerySource << "\n";
+        }
+        if (!m_lastQueryKeyword.isEmpty()) {
+            out << "关键词: " << m_lastQueryKeyword << "\n";
+        }
+        out << "============================================================================\n\n";
+
+        int totalCount = m_historyLogTableModel->getTotalCount();
+        int pageSize = 500;
+        for (int offset = 0; offset < totalCount; offset += pageSize) {
+            QVector<StorageLogEntry> entries = m_logStorage->queryLogs(
+                m_lastQueryStartTime, m_lastQueryEndTime, m_lastQueryMinLevel,
+                m_lastQuerySource, m_lastQueryKeyword, pageSize, offset);
+
+            for (const auto& entry : entries) {
+                out << "[" << entry.timestamp.toString("yyyy-MM-dd hh:mm:ss.zzz") << "] "
+                    << "[" << LogUtils::levelToString(entry.level) << "] "
+                    << "[" << (entry.source.isEmpty() ? "系统" : entry.source) << "] "
+                    << entry.message << "\n";
+            }
+        }
+    }
+
+    file.close();
+    return true;
+}
+
+void MainWindow::onClearHistoryLogs()
+{
+    if (!m_userAuthManager || !m_userAuthManager->canAdmin()) {
+        QMessageBox::warning(this, tr("权限不足"),
+            tr("您需要管理员权限才能清空历史日志。"));
+        return;
+    }
+
+    auto reply = QMessageBox::question(this, tr("确认清空"),
+        tr("确定要清空所有历史日志吗？\n\n此操作不可恢复！"),
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        if (m_logStorage->clearLogs()) {
+            m_historyLogTableModel->clear();
+            m_hasValidQuery = false;
+            updateHistoryLogStats();
+            QMessageBox::information(this, tr("清空成功"), tr("所有历史日志已清空"));
+            qDebug() << "[MainWindow] 历史日志已清空";
+        } else {
+            QMessageBox::critical(this, tr("清空失败"), tr("清空历史日志失败"));
+            qWarning() << "[MainWindow] 清空历史日志失败";
+        }
+    }
+}
+
+void MainWindow::onSelectAllLevels()
+{
+    ui->historyDebugCheckBox->setChecked(true);
+    ui->historyInfoCheckBox->setChecked(true);
+    ui->historyWarningCheckBox->setChecked(true);
+    ui->historyErrorCheckBox->setChecked(true);
+    ui->historyFatalCheckBox->setChecked(true);
+    ui->historyHighFreqCheckBox->setChecked(true);
+}
+
+void MainWindow::onDeselectAllLevels()
+{
+    ui->historyDebugCheckBox->setChecked(false);
+    ui->historyInfoCheckBox->setChecked(false);
+    ui->historyWarningCheckBox->setChecked(false);
+    ui->historyErrorCheckBox->setChecked(false);
+    ui->historyFatalCheckBox->setChecked(false);
+    ui->historyHighFreqCheckBox->setChecked(false);
+}
+
+void MainWindow::setParamSpinBoxColor(const QString& key, Nav2ParameterThread::ParamStatus status)
+{
+    QDoubleSpinBox* spinBox = findChild<QDoubleSpinBox*>(key);
+    if (!spinBox) return;
+
+    QString styleSheet;
+    switch (status) {
+        case Nav2ParameterThread::ParamStatus::Pending:
+            styleSheet = "QDoubleSpinBox { background-color: #e3f2fd; }";  // 浅蓝色
+            break;
+        case Nav2ParameterThread::ParamStatus::Success:
+            styleSheet = "QDoubleSpinBox { background-color: #e8f5e9; }";  // 浅绿色
+            break;
+        case Nav2ParameterThread::ParamStatus::Failed:
+            styleSheet = "QDoubleSpinBox { background-color: #ffebee; }";  // 浅红色
+            break;
+        default:
+            styleSheet = "";  // 默认颜色
+            break;
+    }
+    spinBox->setStyleSheet(styleSheet);
 }

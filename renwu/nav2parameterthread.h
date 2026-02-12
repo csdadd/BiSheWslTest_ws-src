@@ -28,6 +28,14 @@ public:
     };
     Q_ENUM(TaskType)
 
+    enum class ParamStatus {
+        Default,    // 默认状态（无特殊颜色）
+        Pending,    // 待应用（蓝色）
+        Success,    // 应用成功（绿色）
+        Failed      // 应用失败（红色）
+    };
+    Q_ENUM(ParamStatus)
+
     struct ParamInfo {
         QString key;
         QString rosParamName;
@@ -36,12 +44,20 @@ public:
         QVariant currentValue;
         QVariant pendingValue;
         bool modified;
+        ParamStatus status;
 
-        ParamInfo() : modified(false) {}
+        ParamInfo() : modified(false), status(ParamStatus::Default) {}
 
         QString primaryNode() const {
             return nodeNames.isEmpty() ? QString() : nodeNames.first();
         }
+    };
+
+    // 节点参数备份，用于多节点参数设置失败时的回滚
+    struct NodeBackup {
+        QString nodeName;       // 节点名称
+        QString paramName;      // 参数名称
+        QVariant originalValue; // 原始值备份
     };
 
     struct ParamTask {
@@ -70,7 +86,7 @@ public:
 
 signals:
     void parameterRefreshed(bool success, const QString& message);
-    void parameterApplied(bool success, const QString& message, const QStringList& appliedKeys);
+    void parameterApplied(bool success, const QString& message, const QStringList& appliedKeys, const QStringList& failedKeys);
     void operationFinished(const QString& operation, bool success, const QString& message);
     void operationProgress(const QString& operation, int current, int total, const QString& message);
 

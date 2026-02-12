@@ -2,6 +2,7 @@
 #include "logutils.h"
 #include <QColor>
 #include <QDebug>
+#include <algorithm>
 
 LogTableModel::LogTableModel(QObject* parent)
     : QAbstractTableModel(parent)
@@ -86,6 +87,8 @@ QVariant LogTableModel::data(const QModelIndex& index, int role) const
             return QColor(255, 0, 0);
         case LogLevel::FATAL:
             return QColor(139, 0, 0);
+        case LogLevel::HIGHFREQ:
+            return QColor(100, 100, 255);  // 蓝色表示高频日志
         default:
             return QColor(0, 0, 0);
         }
@@ -116,6 +119,11 @@ QVariant LogTableModel::headerData(int section, Qt::Orientation orientation, int
 
 void LogTableModel::addLogEntry(const LogEntry& entry)
 {
+    // 过滤高频日志，不添加到 UI 显示模型
+    if (entry.level == LogLevel::HIGHFREQ) {
+        return;
+    }
+
     m_pendingLogs.append(entry);
 
     // 如果批量更新未启用或待处理日志超过阈值，立即刷新
@@ -130,8 +138,21 @@ void LogTableModel::addLogEntries(const QVector<LogEntry>& entries)
         return;
     }
 
-    beginInsertRows(QModelIndex(), m_logs.size(), m_logs.size() + entries.size() - 1);
-    m_logs += entries;
+    // 过滤高频日志
+    QVector<LogEntry> filteredEntries;
+    filteredEntries.reserve(entries.size());
+    for (const auto& entry : entries) {
+        if (entry.level != LogLevel::HIGHFREQ) {
+            filteredEntries.append(entry);
+        }
+    }
+
+    if (filteredEntries.isEmpty()) {
+        return;
+    }
+
+    beginInsertRows(QModelIndex(), m_logs.size(), m_logs.size() + filteredEntries.size() - 1);
+    m_logs += filteredEntries;
     endInsertRows();
 
     enforceMaxLogs();
@@ -189,7 +210,6 @@ LogEntry LogTableModel::convertStorageEntry(const StorageLogEntry& storageEntry)
     entry.level = storageEntry.level;
     entry.timestamp = storageEntry.timestamp;
     entry.source = storageEntry.source;
-    entry.category = storageEntry.category;
     return entry;
 }
 
@@ -205,9 +225,25 @@ void LogTableModel::loadFromDatabase(const QDateTime& startTime,
         return;
     }
 
+    // 同时查询普通日志和高频日志
     QVector<StorageLogEntry> storageEntries = m_storageEngine->queryLogs(
         startTime, endTime, minLevel, source, keyword, limit
     );
+    QVector<StorageLogEntry> highFreqEntries = m_storageEngine->queryHighFreqLogs(
+        startTime, endTime, limit, 0
+    );
+
+    // 合并两条日志（按时间戳排序）
+    storageEntries.append(highFreqEntries);
+    std::sort(storageEntries.begin(), storageEntries.end(),
+        [](const StorageLogEntry& a, const StorageLogEntry& b) {
+            return a.timestamp > b.timestamp;
+        });
+
+    // 如果有limit限制，截取前limit条
+    if (limit > 0 && storageEntries.size() > limit) {
+        storageEntries = storageEntries.mid(0, limit);
+    }
 
     QVector<LogEntry> entries;
     entries.reserve(storageEntries.size());
@@ -220,7 +256,7 @@ void LogTableModel::loadFromDatabase(const QDateTime& startTime,
     m_logs = entries;
     endResetModel();
 
-    qDebug() << "[LogTableModel] Loaded" << entries.size() << "logs from database";
+    qDebug() << "[LogTableModel] Loaded" << entries.size() << "logs from database (including high freq)";
 }
 
 void LogTableModel::appendFromDatabase(const QDateTime& startTime,
@@ -235,9 +271,25 @@ void LogTableModel::appendFromDatabase(const QDateTime& startTime,
         return;
     }
 
+    // 同时查询普通日志和高频日志
     QVector<StorageLogEntry> storageEntries = m_storageEngine->queryLogs(
         startTime, endTime, minLevel, source, keyword, limit
     );
+    QVector<StorageLogEntry> highFreqEntries = m_storageEngine->queryHighFreqLogs(
+        startTime, endTime, limit, 0
+    );
+
+    // 合并两条日志（按时间戳排序）
+    storageEntries.append(highFreqEntries);
+    std::sort(storageEntries.begin(), storageEntries.end(),
+        [](const StorageLogEntry& a, const StorageLogEntry& b) {
+            return a.timestamp > b.timestamp;
+        });
+
+    // 如果有limit限制，截取前limit条
+    if (limit > 0 && storageEntries.size() > limit) {
+        storageEntries = storageEntries.mid(0, limit);
+    }
 
     if (storageEntries.isEmpty()) {
         return;
@@ -255,7 +307,7 @@ void LogTableModel::appendFromDatabase(const QDateTime& startTime,
 
     enforceMaxLogs();
 
-    qDebug() << "[LogTableModel] Appended" << entries.size() << "logs from database";
+    qDebug() << "[LogTableModel] Appended" << entries.size() << "logs from database (including high freq)";
 }
 
 void LogTableModel::setBatchUpdateEnabled(bool enabled)

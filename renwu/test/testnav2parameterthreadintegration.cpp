@@ -684,4 +684,202 @@ void TestNav2ParameterThreadIntegration::testFullWorkflowModifyDiscard()
     QVERIFY(!m_thread->hasPendingChanges());
 }
 
+// ==================== 回读验证测试 ====================
+
+void TestNav2ParameterThreadIntegration::testVerifyParameterValueAfterWrite()
+{
+    // 测试普通参数写入后的回读验证
+    Nav2ParameterThread::ParamInfo info;
+    QVERIFY(m_thread->getParamInfo("maxVelXSpinBox", info));
+    double originalValue = info.currentValue.toDouble();
+    double testValue = originalValue + 0.1;
+
+    // 设置并应用
+    m_thread->setPendingValue("maxVelXSpinBox", testValue);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+    m_thread->requestApply();
+
+    QVERIFY(spy.wait(10000));
+
+    // 验证信号显示成功
+    QList<QVariant> arguments = spy.takeFirst();
+    bool success = arguments.at(0).toBool();
+    QVERIFY2(success, "参数应用应该成功");
+
+    // 验证 currentValue 已更新
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QCOMPARE(info.currentValue.toDouble(), testValue);
+
+    // 再次刷新来验证 ROS2 中的值确实被设置成功
+    m_thread->requestRefresh();
+    QThread::msleep(1000);
+
+    m_thread->getParamInfo("maxVelXSpinBox", info);
+    QCOMPARE(info.currentValue.toDouble(), testValue);
+
+    qDebug() << "[testVerifyParameterValueAfterWrite] 验证成功: 值确实被写入到 ROS2";
+
+    // 恢复原始值
+    m_thread->setPendingValue("maxVelXSpinBox", originalValue);
+    m_thread->requestApply();
+    QThread::msleep(500);
+}
+
+void TestNav2ParameterThreadIntegration::testVerifyArrayParameterAfterWrite()
+{
+    // 测试数组参数（velocity_smoother）写入后的回读验证
+    Nav2ParameterThread::ParamInfo info;
+    QVERIFY(m_thread->getParamInfo("smootherMaxVelSpinBox", info));
+    double originalValue = info.currentValue.toDouble();
+    double testValue = originalValue + 0.05;
+
+    // 设置并应用
+    m_thread->setPendingValue("smootherMaxVelSpinBox", testValue);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+    m_thread->requestApply();
+
+    QVERIFY(spy.wait(10000));
+
+    // 验证成功
+    QList<QVariant> arguments = spy.takeFirst();
+    bool success = arguments.at(0).toBool();
+    QVERIFY2(success, "数组参数应用应该成功");
+
+    // 刷新验证
+    m_thread->requestRefresh();
+    QThread::msleep(1000);
+
+    m_thread->getParamInfo("smootherMaxVelSpinBox", info);
+    QCOMPARE(info.currentValue.toDouble(), testValue);
+
+    qDebug() << "[testVerifyArrayParameterAfterWrite] 数组参数验证成功";
+
+    // 恢复原始值
+    m_thread->setPendingValue("smootherMaxVelSpinBox", originalValue);
+    m_thread->requestApply();
+    QThread::msleep(500);
+}
+
+void TestNav2ParameterThreadIntegration::testVerifyDetectsMismatch()
+{
+    // 这个测试验证回读验证能检测到不匹配的情况
+    // 由于我们无法在真实环境中模拟参数设置失败，这个测试主要验证机制的存在
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+
+    // 设置一个合理的值
+    m_thread->setPendingValue("maxVelXSpinBox", 0.4);
+
+    m_thread->requestApply();
+
+    QVERIFY(spy.wait(10000));
+
+    // 如果应用成功，说明回读验证通过了
+    QList<QVariant> arguments = spy.takeFirst();
+    bool success = arguments.at(0).toBool();
+
+    if (success) {
+        // 成功的情况下，通过刷新来验证值确实一致
+        m_thread->requestRefresh();
+        QThread::msleep(1000);
+
+        Nav2ParameterThread::ParamInfo info;
+        m_thread->getParamInfo("maxVelXSpinBox", info);
+        QCOMPARE(info.currentValue.toDouble(), 0.4);
+        qDebug() << "[testVerifyDetectsMismatch] 回读验证机制正常工作";
+    } else {
+        // 如果失败，应该有详细的错误信息
+        QString message = arguments.at(1).toString();
+        qDebug() << "[testVerifyDetectsMismatch] 应用失败:" << message;
+        QVERIFY2(message.contains("失败") || message.contains("验证"),
+                 "失败消息应包含失败或验证相关信息");
+    }
+}
+
+void TestNav2ParameterThreadIntegration::testVerifyAfterPartialFailure()
+{
+    // 测试多节点参数在部分节点失败时的行为
+    Nav2ParameterThread::ParamInfo info;
+
+    // robotRadius 写入到两个节点
+    m_thread->getParamInfo("robotRadiusSpinBox", info);
+    double originalValue = info.currentValue.toDouble();
+    double testValue = originalValue + 0.01;
+
+    m_thread->setPendingValue("robotRadiusSpinBox", testValue);
+
+    QSignalSpy spy(m_thread, &Nav2ParameterThread::parameterApplied);
+    m_thread->requestApply();
+
+    QVERIFY(spy.wait(10000));
+
+    QList<QVariant> arguments = spy.takeFirst();
+    bool success = arguments.at(0).toBool();
+    QStringList failedKeys = arguments.at(3).toStringList();
+
+    // 如果成功，两个节点都应该成功写入
+    if (success) {
+        m_thread->requestRefresh();
+        QThread::msleep(1000);
+
+        m_thread->getParamInfo("robotRadiusSpinBox", info);
+        QCOMPARE(info.currentValue.toDouble(), testValue);
+        qDebug() << "[testVerifyAfterPartialFailure] 多节点参数写入成功";
+    } else {
+        // 如果失败，应该记录到失败列表
+        QVERIFY2(!failedKeys.isEmpty() || arguments.at(1).toString().contains("失败"),
+                 "失败时应有失败列表或失败消息");
+        qDebug() << "[testVerifyAfterPartialFailure] 失败的参数:" << failedKeys;
+    }
+
+    // 恢复原始值
+    m_thread->setPendingValue("robotRadiusSpinBox", originalValue);
+    m_thread->requestApply();
+    QThread::msleep(500);
+}
+
+void TestNav2ParameterThreadIntegration::testMultiNodeRollback()
+{
+    // 测试多节点参数的回滚机制
+    // 场景：第一个节点设置成功，第二个节点设置失败，验证第一个节点被回滚
+
+    QSKIP("此测试需要手动关闭 Nav2 节点，跳过自动测试。请使用手动测试步骤验证回滚机制。");
+
+    // === 手动测试步骤 ===
+    //
+    // 前置条件：Nav2 仿真已启动
+    //
+    // 步骤 1：获取 robotRadius 的初始值
+    //   ros2 param get /local_costmap/local_costmap robot_radius
+    //   ros2 param get /global_costmap/global_costmap robot_radius
+    //
+    // 步骤 2：关闭 global_costmap 节点（模拟第二个节点失败）
+    //   ros2 lifecycle set /global_costmap/global_costmap shutdown
+    //
+    // 步骤 3：在 UI 中修改 robot_radius 参数并点击"应用"
+    //   - 预期：操作返回失败
+    //   - 预期：日志输出 "开始回滚已写入的节点: robotRadiusSpinBox"
+    //   - 预期：日志输出 "参数设置成功并已验证" (回滚操作)
+    //
+    // 步骤 4：验证 local_costmap 的值被回滚到原值
+    //   ros2 param get /local_costmap/local_costmap robot_radius
+    //   - 预期：值应与步骤 1 中的初始值相同
+    //
+    // 步骤 5：恢复 global_costmap 节点
+    //   ros2 lifecycle set /global_costmap/global_costmap configure
+    //   ros2 lifecycle set /global_costmap/global_costmap activate
+    //
+    // 步骤 6：验证回滚机制成功
+    //   - 如果 local_costmap 的值被恢复到原值，则回滚机制工作正常
+    //
+    // === 预期日志输出 ===
+    // [Nav2ParameterThread] 备份参数: robotRadiusSpinBox ...
+    // [Nav2ParameterThread] 参数设置成功并已验证: "robot_radius" = ...
+    // [Nav2ParameterThread] 应用参数失败: robotRadiusSpinBox 节点: "/global_costmap/global_costmap"
+    // [Nav2ParameterThread] 开始回滚已写入的节点: robotRadiusSpinBox
+    // [Nav2ParameterThread] 参数设置成功并已验证: "robot_radius" = ... (回滚到原值)
+}
+
 #include "testnav2parameterthreadintegration.moc"

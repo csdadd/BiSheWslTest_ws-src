@@ -31,6 +31,8 @@ inline QString levelToString(LogLevel level) {
             return "ERROR";
         case LogLevel::FATAL:
             return "FATAL";
+        case LogLevel::HIGHFREQ:
+            return "HIGHFREQ";
         default:
             return "UNKNOWN";
     }
@@ -48,6 +50,7 @@ inline LogLevel levelFromString(const QString& levelStr) {
     if (upper == "WARN" || upper == "WARNING") return LogLevel::WARNING;
     if (upper == "ERROR") return LogLevel::ERROR;
     if (upper == "FATAL") return LogLevel::FATAL;
+    if (upper == "HIGHFREQ") return LogLevel::HIGHFREQ;
     return LogLevel::INFO;  // 默认级别
 }
 

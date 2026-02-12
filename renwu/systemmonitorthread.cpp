@@ -5,8 +5,8 @@
 #include <thread>
 #include <QDebug>
 
-SystemMonitorThread::SystemMonitorThread(LogStorageEngine* storageEngine, QObject* parent)
-    : BaseThread(parent), m_storageEngine(storageEngine)
+SystemMonitorThread::SystemMonitorThread(QObject* parent)
+    : BaseThread(parent)
 {
     m_threadName = "SystemMonitorThread";
     qDebug() << "[SystemMonitorThread] 构造函数";
@@ -30,10 +30,6 @@ void SystemMonitorThread::initialize()
         subscribeROSTopics();
         m_executor->add_node(m_rosNode);
         setExecutor(m_executor);
-
-        if (m_storageEngine && !m_storageEngine->isInitialized()) {
-            emit threadError("LogStorageEngine not initialized");
-        }
 
         emit logMessage("SystemMonitorThread 初始化成功", LogLevel::INFO);
         emit logMessage("系统监控已启动 - 开始收集日志和诊断信息", LogLevel::INFO);
@@ -81,33 +77,7 @@ void SystemMonitorThread::process()
 {
     m_processCount++;
     if (m_processCount >= 100) {
-        // qDebug() << "[SystemMonitorThread] 正在运行 - 监控ROS日志、碰撞检测和行为树";
         m_processCount = 0;
-    }
-
-    QVector<StorageLogEntry> batchEntries;
-    MonitorLogEntry entry;
-    
-    while (m_logQueue.tryDequeue(entry, 0)) {
-        StorageLogEntry storageEntry(
-            entry.message,
-            entry.level,
-            entry.timestamp,
-            entry.source,
-            entry.category
-        );
-        batchEntries.append(storageEntry);
-        
-        if (batchEntries.size() >= 100) {
-            if (m_storageEngine && m_storageEngine->isInitialized()) {
-                m_storageEngine->insertLogs(batchEntries);
-            }
-            batchEntries.clear();
-        }
-    }
-    
-    if (!batchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
-        m_storageEngine->insertLogs(batchEntries);
     }
 }
 
@@ -162,9 +132,10 @@ void SystemMonitorThread::processROSLog(const rcl_interfaces::msg::Log::SharedPt
                         msg->stamp.nanosec / 1000000;
     QDateTime timestamp = QDateTime::fromMSecsSinceEpoch(totalMSecs);
 
-    m_logQueue.enqueue(MonitorLogEntry(message, level, timestamp, source, "ROS"));
+    // 为消息添加 /rosout_agg 来源标记，便于与 /diagnostics 来源区分
+    QString taggedMessage = QString("%1 [/rosout_agg]").arg(message);
 
-    emit logMessageReceived(message, static_cast<int>(level), timestamp);
+    emit logMessageReceived(taggedMessage, static_cast<int>(level), timestamp);
 
     if (level >= LogLevel::ERROR) {
         QString logMsg = QString("[%1] %2").arg(source, message);
@@ -177,8 +148,6 @@ void SystemMonitorThread::processCollisionData(const sensor_msgs::msg::PointClou
     if (msg->width * msg->height > 0) {
         QString message = QString("Collision detected! %1 points in bumper cloud").arg(msg->width * msg->height);
         QDateTime timestamp = QDateTime::currentDateTime();
-
-        m_logQueue.enqueue(MonitorLogEntry(message, LogLevel::ERROR, timestamp, "Bumper", "Collision"));
 
         emit collisionDetected(message);
         emit logMessageReceived(message, static_cast<int>(LogLevel::ERROR), timestamp);
@@ -196,8 +165,6 @@ void SystemMonitorThread::processBehaviorTreeLog(const nav2_msgs::msg::BehaviorT
             QDateTime timestamp = QDateTime::currentDateTime();
 
             LogLevel level = (status == "FAILURE") ? LogLevel::ERROR : LogLevel::WARNING;
-
-            m_logQueue.enqueue(MonitorLogEntry(fullMsg, level, timestamp, "BehaviorTree", "Navigation"));
 
             emit behaviorTreeLogReceived(fullMsg);
             emit logMessageReceived(fullMsg, static_cast<int>(level), timestamp);
@@ -221,9 +188,9 @@ void SystemMonitorThread::onDiagnosticsReceived(const QString& status, int level
         monitorLevel = LogLevel::ERROR;
     }
 
-    m_logQueue.enqueue(MonitorLogEntry(message, monitorLevel, timestamp, status, "Diagnostics"));
-
-    emit logMessageReceived(message, static_cast<int>(monitorLevel), timestamp);
+    // 添加来源标记
+    QString taggedMessage = QString("%1 [/rosout_agg]").arg(message);
+    emit logMessageReceived(taggedMessage, static_cast<int>(monitorLevel), timestamp);
 
     if (level >= 2) {
         QString fullMsg = QString("[%1] %2").arg(status, message);

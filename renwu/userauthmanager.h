@@ -53,6 +53,9 @@ public:
 
     QVector<User> getAllUsers();
 
+    // 测试模式：直接以管理员身份登录（仅用于测试）
+    void setTestAdminMode();
+
     QString getLastError() const;
 
 signals:

@@ -12,7 +12,8 @@ enum class LogLevel : int {
     INFO = 1,
     WARNING = 2,
     ERROR = 3,
-    FATAL = 4
+    FATAL = 4,
+    HIGHFREQ = 5  // 高频日志级别
 };
 
 // 为了保持向后兼容性，提供内联常量
@@ -21,5 +22,6 @@ inline constexpr LogLevel LOG_INFO = LogLevel::INFO;
 inline constexpr LogLevel LOG_WARNING = LogLevel::WARNING;
 inline constexpr LogLevel LOG_ERROR = LogLevel::ERROR;
 inline constexpr LogLevel LOG_FATAL = LogLevel::FATAL;
+inline constexpr LogLevel LOG_HIGHFREQ = LogLevel::HIGHFREQ;
 
 #endif // LOGLEVEL_H

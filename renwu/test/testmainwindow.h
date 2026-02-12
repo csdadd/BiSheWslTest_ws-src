@@ -48,7 +48,7 @@ private slots:
     void testThreadLifecycle();
 
     void testLogFilterCheckBoxesUI();
-    void testShouldDisplayLog();
+    void testLogFiltering();
     void testRefreshLogDisplay();
     void testOnFilterChanged();
     void testLogRealTimeFiltering();

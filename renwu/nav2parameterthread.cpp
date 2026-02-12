@@ -340,6 +340,44 @@ bool Nav2ParameterThread::setParameterOnNode(const QString& nodeName, const QStr
             return false;
         }
 
+        // 回读验证：确认参数确实被设置成功
+        auto verifyParams = client->get_parameters({paramName.toStdString()}, std::chrono::seconds(2));
+        if (verifyParams.empty()) {
+            qWarning() << "[Nav2ParameterThread] 回读验证失败：无法获取参数" << paramName;
+            return false;
+        }
+
+        auto& verifyParam = verifyParams[0];
+
+        if (nodeName == "/velocity_smoother") {
+            // 对于数组参数，验证第一个元素是否匹配
+            if (verifyParam.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE_ARRAY) {
+                auto arr = verifyParam.as_double_array();
+                if (arr.empty() || !qFuzzyCompare(arr[0], value.toDouble())) {
+                    qWarning() << "[Nav2ParameterThread] 回读验证失败：值不匹配。期望:" << value.toDouble() << "实际:" << (arr.empty() ? 0.0 : arr[0]);
+                    return false;
+                }
+            } else {
+                qWarning() << "[Nav2ParameterThread] 回读验证失败：参数类型不匹配";
+                return false;
+            }
+        } else {
+            // 对于普通参数，直接比较值
+            QVariant actualValue = parameterToVariant(verifyParam);
+            if (value.type() == QVariant::Double) {
+                if (!qFuzzyCompare(actualValue.toDouble(), value.toDouble())) {
+                    qWarning() << "[Nav2ParameterThread] 回读验证失败：值不匹配。期望:" << value.toDouble() << "实际:" << actualValue.toDouble();
+                    return false;
+                }
+            } else {
+                if (actualValue != value) {
+                    qWarning() << "[Nav2ParameterThread] 回读验证失败：值不匹配。期望:" << value << "实际:" << actualValue;
+                    return false;
+                }
+            }
+        }
+
+        qDebug() << "[Nav2ParameterThread] 参数设置成功并已验证:" << paramName << "=" << value;
         return true;
 
     } catch (const std::exception& e) {
@@ -385,6 +423,7 @@ void Nav2ParameterThread::executeRefresh()
             param.currentValue = value;
             param.pendingValue = value;
             param.modified = false;
+            param.status = ParamStatus::Default;
             successCount++;
         } else {
             qWarning() << "[Nav2ParameterThread] 刷新参数失败:" << param.key;
@@ -396,7 +435,7 @@ void Nav2ParameterThread::executeRefresh()
 
     QString message = QString("刷新完成: 成功 %1, 失败 %2").arg(successCount).arg(failCount);
     qDebug() << "[Nav2ParameterThread]" << message;
-    emit operationFinished("refresh", failCount == 0, message);
+    emit parameterRefreshed(failCount == 0, message);
 }
 
 void Nav2ParameterThread::executeApply()
@@ -407,15 +446,54 @@ void Nav2ParameterThread::executeApply()
     QStringList failedKeys;
     int modifiedCount = 0;
 
+    // 阶段1：备份所有待修改参数的原值
+    QMap<QString, QVector<NodeBackup>> allBackups;  // key -> 节点备份列表
+
     for (auto& param : m_params) {
         if (!param.modified) {
             continue;
         }
         modifiedCount++;
 
-        bool allSuccess = true;
+        QVector<NodeBackup> backups;
         for (const auto& nodeName : param.nodeNames) {
-            if (!setParameterOnNode(nodeName, param.rosParamName, param.pendingValue)) {
+            NodeBackup backup;
+            backup.nodeName = nodeName;
+            backup.paramName = param.rosParamName;
+            backup.originalValue = getParameterFromNode(nodeName, param.rosParamName);
+
+            if (!backup.originalValue.isValid()) {
+                qWarning() << "[Nav2ParameterThread] 备份失败，取消应用:" << param.key;
+                emit operationFinished("apply", false, QString("备份参数失败: %1").arg(param.key));
+                return;
+            }
+            backups.append(backup);
+        }
+        allBackups[param.key] = backups;
+    }
+
+    if (modifiedCount == 0) {
+        qDebug() << "[Nav2ParameterThread] 没有待应用的更改";
+        emit operationFinished("apply", true, "没有待应用的更改");
+        return;
+    }
+
+    // 阶段2：应用参数修改
+    for (auto& param : m_params) {
+        if (!param.modified) {
+            continue;
+        }
+
+        bool allSuccess = true;
+        const QVector<NodeBackup>& backups = allBackups[param.key];
+        int lastSuccessIndex = -1;  // 记录最后一个成功写入的节点索引
+
+        // 依次写入所有节点
+        for (int i = 0; i < param.nodeNames.size(); ++i) {
+            const auto& nodeName = param.nodeNames[i];
+            if (setParameterOnNode(nodeName, param.rosParamName, param.pendingValue)) {
+                lastSuccessIndex = i;
+            } else {
                 qWarning() << "[Nav2ParameterThread] 应用参数失败:" << param.key
                            << "节点:" << nodeName;
                 allSuccess = false;
@@ -424,27 +502,33 @@ void Nav2ParameterThread::executeApply()
         }
 
         if (allSuccess) {
+            // 全部成功：更新本地状态
             param.currentValue = param.pendingValue;
             param.modified = false;
+            param.status = ParamStatus::Success;
             appliedKeys.append(param.key);
         } else {
+            // 失败：回滚已写入的节点
+            qWarning() << "[Nav2ParameterThread] 开始回滚已写入的节点:" << param.key;
+            for (int i = 0; i <= lastSuccessIndex; ++i) {
+                const auto& backup = backups[i];
+                if (!setParameterOnNode(backup.nodeName, backup.paramName, backup.originalValue)) {
+                    qCritical() << "[Nav2ParameterThread] 回滚失败:" << backup.nodeName
+                                << "参数可能处于不一致状态";
+                }
+            }
+            param.status = ParamStatus::Failed;
             failedKeys.append(param.key);
         }
     }
 
     locker.unlock();
 
-    if (modifiedCount == 0) {
-        qDebug() << "[Nav2ParameterThread] 没有待应用的更改";
-        emit operationFinished("apply", true, "没有待应用的更改");
-        return;
-    }
-
     QString message = QString("应用完成: 成功 %1, 失败 %2")
                           .arg(appliedKeys.size())
                           .arg(failedKeys.size());
     qDebug() << "[Nav2ParameterThread]" << message;
-    emit parameterApplied(failedKeys.isEmpty(), message, appliedKeys);
+    emit parameterApplied(failedKeys.isEmpty(), message, appliedKeys, failedKeys);
     emit operationFinished("apply", failedKeys.isEmpty(), message);
 }
 
