@@ -4,6 +4,8 @@
 #include <QMainWindow>
 #include <QThreadPool>
 #include <QStandardPaths>
+#include <QFutureWatcher>
+#include <QtConcurrent>
 #include <memory>
 #include "robotstatusthread.h"
 #include "navstatusthread.h"
@@ -83,9 +85,9 @@ private slots:
 
     // 历史日志槽函数
     void onHistoryLogQuery();
-    void onHistoryLogQueryCompleted(const QVector<StorageLogEntry>& results);
+    void onHistoryLogQueryFinished();
     void onHistoryLogQueryFailed(const QString& error);
-    void onHistoryLogPageLoaded(const QVector<StorageLogEntry>& results);
+    void onHistoryPageLoadFinished();
     void onTodayButtonClicked();
     void onYesterdayButtonClicked();
     void onLast7DaysButtonClicked();
@@ -169,6 +171,8 @@ private:
     // 历史日志相关
     std::unique_ptr<HistoryLogTableModel> m_historyLogTableModel;
     std::unique_ptr<LogFilterProxyModel> m_historyLogFilterProxyModel;
+    QFutureWatcher<LogQueryResult>* m_historyLogQueryWatcher;
+    QFutureWatcher<LogQueryResult>* m_historyPageLoadWatcher;
 
     // 查询条件缓存
     QDateTime m_lastQueryStartTime;

@@ -61,6 +61,7 @@ public:
     bool vacuum();
 
     QString getLastError() const;
+    QString getDbPath() const;
 
     // 高频日志相关方法
     bool insertHighFreqLog(const StorageLogEntry& entry);

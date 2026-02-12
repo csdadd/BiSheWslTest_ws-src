@@ -359,6 +359,15 @@ void MainWindow::connectSignals()
     connect(ui->selectAllLevelsButton, &QPushButton::clicked, this, &MainWindow::onSelectAllLevels);
     connect(ui->deselectAllLevelsButton, &QPushButton::clicked, this, &MainWindow::onDeselectAllLevels);
 
+    // 历史日志查询 QFutureWatcher 初始化
+    m_historyLogQueryWatcher = new QFutureWatcher<LogQueryResult>(this);
+    connect(m_historyLogQueryWatcher, &QFutureWatcher<LogQueryResult>::finished,
+            this, &MainWindow::onHistoryLogQueryFinished);
+
+    m_historyPageLoadWatcher = new QFutureWatcher<LogQueryResult>(this);
+    connect(m_historyPageLoadWatcher, &QFutureWatcher<LogQueryResult>::finished,
+            this, &MainWindow::onHistoryPageLoadFinished);
+
     // 连接按钮信号
     connect(ui->btnStartNavigation, &QPushButton::clicked, this, &MainWindow::onStartNavigation);
     connect(ui->btnCancelNavigation, &QPushButton::clicked, this, &MainWindow::onCancelNavigation);
@@ -1826,21 +1835,38 @@ void MainWindow::onHistoryLogQuery()
     ui->queryButton->setEnabled(false);
     ui->queryButton->setText(tr("查询中..."));
 
-    auto* task = new LogQueryTask(m_logStorage.get(),
-        startTime, endTime, minLevel, source, keyword, pageSize, 0, this);
-    connect(task, &LogQueryTask::queryCompleted,
-            this, &MainWindow::onHistoryLogQueryCompleted);
-    connect(task, &LogQueryTask::queryFailed,
-            this, &MainWindow::onHistoryLogQueryFailed);
-    QThreadPool::globalInstance()->start(task);
+    LogQueryParams params;
+    params.dbPath = m_logStorage->getDbPath();
+    params.startTime = startTime;
+    params.endTime = endTime;
+    params.minLevel = minLevel;
+    params.source = source;
+    params.keyword = keyword;
+    params.limit = pageSize;
+    params.offset = 0;
+
+    QFuture<LogQueryResult> future = QtConcurrent::run([params]() {
+        return LogQueryTask::execute(params);
+    });
+
+    m_historyLogQueryWatcher->setFuture(future);
 }
 
-void MainWindow::onHistoryLogQueryCompleted(const QVector<StorageLogEntry>& results)
+void MainWindow::onHistoryLogQueryFinished()
 {
+    LogQueryResult result = m_historyLogQueryWatcher->result();
+
+    if (!result.success) {
+        QMessageBox::critical(this, tr("查询失败"), tr("查询历史日志失败:\n%1").arg(result.errorMessage));
+        ui->queryButton->setEnabled(true);
+        ui->queryButton->setText(tr("查询"));
+        return;
+    }
+
     int totalCount = m_logStorage->getLogCount(m_lastQueryStartTime,
         m_lastQueryEndTime, m_lastQueryMinLevel);
 
-    m_historyLogTableModel->setQueryResults(results);
+    m_historyLogTableModel->setQueryResults(result.results);
     m_historyLogTableModel->setPaginationInfo(totalCount, 1, ui->pageSizeComboBox->currentText().toInt());
 
     updateHistoryLogStats();
@@ -1861,12 +1887,17 @@ void MainWindow::onHistoryLogQueryFailed(const QString& error)
     qWarning() << "[MainWindow] 历史日志查询失败:" << error;
 }
 
-void MainWindow::onHistoryLogPageLoaded(const QVector<StorageLogEntry>& results)
+void MainWindow::onHistoryPageLoadFinished()
 {
-    m_historyLogTableModel->setQueryResults(results);
-    updateHistoryLogStats();
+    LogQueryResult result = m_historyPageLoadWatcher->result();
 
-    qDebug() << "[MainWindow] 历史日志分页加载完成，当前页" << m_historyLogTableModel->getCurrentPage();
+    if (result.success) {
+        m_historyLogTableModel->setQueryResults(result.results);
+        updateHistoryLogStats();
+        qDebug() << "[MainWindow] 历史日志分页加载完成，当前页" << m_historyLogTableModel->getCurrentPage();
+    } else {
+        qWarning() << "[MainWindow] 分页加载失败:" << result.errorMessage;
+    }
 }
 
 void MainWindow::loadHistoryPage(int page)
@@ -1884,14 +1915,21 @@ void MainWindow::loadHistoryPage(int page)
     int pageSize = ui->pageSizeComboBox->currentText().toInt();
     int offset = (page - 1) * pageSize;
 
-    auto* task = new LogQueryTask(m_logStorage.get(),
-        m_lastQueryStartTime, m_lastQueryEndTime, m_lastQueryMinLevel,
-        m_lastQuerySource, m_lastQueryKeyword, pageSize, offset, this);
-    connect(task, &LogQueryTask::queryCompleted,
-            this, &MainWindow::onHistoryLogPageLoaded);
-    connect(task, &LogQueryTask::queryFailed,
-            this, &MainWindow::onHistoryLogQueryFailed);
-    QThreadPool::globalInstance()->start(task);
+    LogQueryParams params;
+    params.dbPath = m_logStorage->getDbPath();
+    params.startTime = m_lastQueryStartTime;
+    params.endTime = m_lastQueryEndTime;
+    params.minLevel = m_lastQueryMinLevel;
+    params.source = m_lastQuerySource;
+    params.keyword = m_lastQueryKeyword;
+    params.limit = pageSize;
+    params.offset = offset;
+
+    QFuture<LogQueryResult> future = QtConcurrent::run([params]() {
+        return LogQueryTask::execute(params);
+    });
+
+    m_historyPageLoadWatcher->setFuture(future);
 }
 
 void MainWindow::updateHistoryLogStats()

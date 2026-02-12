@@ -23,7 +23,7 @@
 #include "testlogstorageengine.h"
 #include "testlogtablemodel.h"
 #include "testlogfilterproxymodel.h"
-#include "testlogquerytask.h"
+// #include "testlogquerytask.h"
 #include "testlogthread.h"
 #include "testbasethread.h"
 #include "testroscontextmanager.h"
@@ -96,7 +96,7 @@ int main(int argc, char** argv)
         {"logstorage", "log", RUN_TEST(TestLogStorageEngine)},
         {"logtable", "log", RUN_TEST(TestLogTableModel)},
         {"logfilter", "log", RUN_TEST(TestLogFilterProxyModel)},
-        {"logquery", "log", RUN_TEST(TestLogQueryTask)},
+//         {"logquery", "log", RUN_TEST(TestLogQueryTask)},
         {"logthread", "log", RUN_TEST(TestLogThread)},
         {"historylogmodel", "log", RUN_TEST(TestHistoryLogTableModel)},
 

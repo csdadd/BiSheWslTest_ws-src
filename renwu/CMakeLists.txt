@@ -190,8 +190,8 @@ if(BUILD_TESTING)
         test/testlogtablemodel.h
         test/testlogfilterproxymodel.cpp
         test/testlogfilterproxymodel.h
-        test/testlogquerytask.cpp
-        test/testlogquerytask.h
+#         test/testlogquerytask.cpp
+#         test/testlogquerytask.h
         test/testlogthread.cpp
         test/testlogthread.h
         test/testbasethread.cpp

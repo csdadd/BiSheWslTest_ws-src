@@ -448,6 +448,12 @@ QString LogStorageEngine::getLastError() const
     return m_lastError;
 }
 
+QString LogStorageEngine::getDbPath() const
+{
+    QReadLocker locker(&m_lock);
+    return m_dbPath;
+}
+
 bool LogStorageEngine::insertHighFreqLog(const StorageLogEntry& entry)
 {
     QWriteLocker locker(&m_lock);
