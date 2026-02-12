@@ -128,6 +128,10 @@ void SystemMonitorThread::processROSLog(const rcl_interfaces::msg::Log::SharedPt
             break;
     }
 
+    if (message.contains("Nav2 is active")) {
+        level = LogLevel::HIGHFREQ;
+    }
+
     qint64 totalMSecs = static_cast<qint64>(msg->stamp.sec) * 1000 +
                         msg->stamp.nanosec / 1000000;
     QDateTime timestamp = QDateTime::fromMSecsSinceEpoch(totalMSecs);
@@ -186,6 +190,10 @@ void SystemMonitorThread::onDiagnosticsReceived(const QString& status, int level
         monitorLevel = LogLevel::WARNING;
     } else if (level >= 2) {
         monitorLevel = LogLevel::ERROR;
+    }
+
+    if (message.contains("Nav2 is active")) {
+        monitorLevel = LogLevel::HIGHFREQ;
     }
 
     // 添加来源标记

@@ -647,6 +647,10 @@ void MainWindow::onDiagnosticsReceived(const QString& status, int level, const Q
     else if (level == 3) logLevel = LogLevel::FATAL;
     else if (level == 4) logLevel = LogLevel::DEBUG;
 
+    if (message.contains("Nav2 is active")) {
+        logLevel = LogLevel::HIGHFREQ;
+    }
+
     // 去掉状态名中的 ": Nav2 Health" 后缀，使格式更简洁
     QString simplifiedStatus = status;
     if (status.contains(": Nav2 Health")) {
