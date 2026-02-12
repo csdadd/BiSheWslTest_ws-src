@@ -68,11 +68,13 @@ private:
     LogStorageEngine* m_storageEngine;
     QString m_currentLogDate;
     int m_processCount = 0;
-    int m_nav2ActiveLogCount = 0;
-    int m_odometryLogCount = 0;
+
+    QVector<StorageLogEntry> m_pendingBatchEntries;
+    QDateTime m_lastBatchWriteTime;
 
     static constexpr qint64 DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024;
     static constexpr int DEFAULT_MAX_FILE_COUNT = 5;
+    static constexpr int BATCH_WRITE_INTERVAL_MS = 2000;
 };
 
 #endif // LOGTHREAD_H

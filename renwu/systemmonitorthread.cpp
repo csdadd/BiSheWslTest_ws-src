@@ -182,6 +182,20 @@ void SystemMonitorThread::processBehaviorTreeLog(const nav2_msgs::msg::BehaviorT
 
 void SystemMonitorThread::onDiagnosticsReceived(const QString& status, int level, const QString& message)
 {
+    QString finalMessage = message;
+
+    if (message.contains("Nav2 is active")) {
+        m_nav2ActiveCount++;
+        if (m_nav2ActiveCount % 10 != 1) {
+            return;
+        }
+        if (status.contains("lifecycle_manager_navigation")) {
+            finalMessage = QString("[lifecycle_manager_navigation] %1").arg(message);
+        } else if (status.contains("lifecycle_manager_localization")) {
+            finalMessage = QString("[lifecycle_manager_localization] %1").arg(message);
+        }
+    }
+
     QDateTime timestamp = QDateTime::currentDateTime();
 
     LogLevel monitorLevel = LogLevel::INFO;
@@ -192,16 +206,16 @@ void SystemMonitorThread::onDiagnosticsReceived(const QString& status, int level
         monitorLevel = LogLevel::ERROR;
     }
 
-    if (message.contains("Nav2 is active")) {
+    if (finalMessage.contains("Nav2 is active")) {
         monitorLevel = LogLevel::HIGHFREQ;
     }
 
     // 添加来源标记
-    QString taggedMessage = QString("%1 [/rosout_agg]").arg(message);
+    QString taggedMessage = QString("%1 [/rosout_agg]").arg(finalMessage);
     emit logMessageReceived(taggedMessage, static_cast<int>(monitorLevel), timestamp);
 
     if (level >= 2) {
-        QString fullMsg = QString("[%1] %2").arg(status, message);
+        QString fullMsg = QString("[%1] %2").arg(status, finalMessage);
         emit anomalyDetected(fullMsg);
     }
 }

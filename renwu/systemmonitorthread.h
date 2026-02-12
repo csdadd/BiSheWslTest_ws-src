@@ -64,6 +64,7 @@ private:
     rclcpp::Subscription<nav2_msgs::msg::BehaviorTreeLog>::SharedPtr m_behaviorTreeSub;
 
     int m_processCount = 0;
+    int m_nav2ActiveCount = 0;  // Nav2 is active 日志采样计数器
 };
 
 #endif // SYSTEMMONITORTHREAD_H

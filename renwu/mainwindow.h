@@ -56,7 +56,6 @@ private slots:
     void onPositionReceived(double x, double y, double yaw);
     void onOdometryReceived(double x, double y, double yaw, double vx, double vy, double omega);
     void onSystemTimeReceived(const QString& time);
-    void onDiagnosticsReceived(const QString& status, int level, const QString& message);
     void updateCurrentTime();
 
     // NavStatusThread槽函数
@@ -177,9 +176,10 @@ private:
     // 查询条件缓存
     QDateTime m_lastQueryStartTime;
     QDateTime m_lastQueryEndTime;
-    LogLevel m_lastQueryMinLevel;
+    QSet<int> m_lastQuerySelectedLevels;
     QString m_lastQuerySource;
     QString m_lastQueryKeyword;
+    bool m_lastQueryIncludeHighFreq;
     bool m_hasValidQuery = false;
     // 内存中的完整日志缓存，用于日志管理和按级别清除等操作 (最大 10000 条)
     // 设计目的：分离数据缓存层(m_allLogs)和显示层(m_logTableModel)，使得内存中保留更多历史日志，

@@ -23,8 +23,48 @@ LogQueryResult LogQueryTask::execute(const LogQueryParams& params)
         return result;
     }
 
-    QVector<QVariant> bindValues;
+    QVector<StorageLogEntry> allResults;
+
     QString sql = "SELECT timestamp, level, message, source, file_path, line_number FROM logs WHERE 1=1";
+    QVector<QVariant> bindValues = buildWhereClause(params, sql);
+
+    executeQuery(db, sql, bindValues, allResults);
+
+    if (params.includeHighFreq) {
+        QString hfSql = "SELECT timestamp, level, message, source, file_path, line_number FROM high_freq_logs WHERE 1=1";
+        QVector<QVariant> hfBindValues = buildWhereClause(params, hfSql);
+        executeQuery(db, hfSql, hfBindValues, allResults);
+    }
+
+    if (params.includeOdometry) {
+        QString odomSql = "SELECT timestamp, level, message, source, file_path, line_number FROM odometry_logs WHERE 1=1";
+        QVector<QVariant> odomBindValues = buildWhereClause(params, odomSql);
+        executeQuery(db, odomSql, odomBindValues, allResults);
+    }
+
+    std::sort(allResults.begin(), allResults.end(), [](const StorageLogEntry& a, const StorageLogEntry& b) {
+        return a.timestamp > b.timestamp;
+    });
+
+    int total = allResults.size();
+    int start = params.offset > 0 ? qMin(params.offset, total) : 0;
+    int end = params.limit > 0 ? qMin(start + params.limit, total) : total;
+
+    result.results = allResults.mid(start, end - start);
+    result.totalCount = total;
+
+    qDebug() << "[LogQueryTask] Query completed, found" << result.results.size() << "logs (total:" << total << ")";
+
+    db.close();
+    QSqlDatabase::removeDatabase(connectionName);
+
+    result.success = true;
+    return result;
+}
+
+QVector<QVariant> LogQueryTask::buildWhereClause(const LogQueryParams& params, QString& sql)
+{
+    QVector<QVariant> bindValues;
 
     if (params.startTime.isValid()) {
         sql += " AND timestamp >= ?";
@@ -36,9 +76,14 @@ LogQueryResult LogQueryTask::execute(const LogQueryParams& params)
         bindValues.append(params.endTime.toMSecsSinceEpoch());
     }
 
-    if (params.minLevel != LogLevel::DEBUG) {
-        sql += " AND level >= ?";
-        bindValues.append(static_cast<int>(params.minLevel));
+    if (!params.selectedLevels.isEmpty()) {
+        sql += " AND level IN (";
+        for (int i = 0; i < params.selectedLevels.size(); ++i) {
+            if (i > 0) sql += ",";
+            sql += "?";
+            bindValues.append(params.selectedLevels[i]);
+        }
+        sql += ")";
     }
 
     if (!params.source.isEmpty()) {
@@ -51,18 +96,11 @@ LogQueryResult LogQueryTask::execute(const LogQueryParams& params)
         bindValues.append(QString("%1%").arg(params.keyword));
     }
 
-    sql += " ORDER BY timestamp DESC";
+    return bindValues;
+}
 
-    if (params.limit > 0) {
-        sql += " LIMIT ?";
-        bindValues.append(params.limit);
-    }
-
-    if (params.offset > 0) {
-        sql += " OFFSET ?";
-        bindValues.append(params.offset);
-    }
-
+void LogQueryTask::executeQuery(QSqlDatabase& db, const QString& sql, const QVector<QVariant>& bindValues, QVector<StorageLogEntry>& results)
+{
     QSqlQuery query(db);
     query.prepare(sql);
 
@@ -71,11 +109,8 @@ LogQueryResult LogQueryTask::execute(const LogQueryParams& params)
     }
 
     if (!query.exec()) {
-        result.errorMessage = QString("Failed to query logs: %1").arg(query.lastError().text());
-        qWarning() << "[LogQueryTask]" << result.errorMessage;
-        db.close();
-        QSqlDatabase::removeDatabase(connectionName);
-        return result;
+        qWarning() << "[LogQueryTask] Failed to query:" << query.lastError().text();
+        return;
     }
 
     while (query.next()) {
@@ -86,14 +121,6 @@ LogQueryResult LogQueryTask::execute(const LogQueryParams& params)
         entry.source = query.value(3).toString();
         entry.filePath = query.value(4).toString();
         entry.lineNumber = query.value(5).toInt();
-        result.results.append(entry);
+        results.append(entry);
     }
-
-    qDebug() << "[LogQueryTask] Query completed, found" << result.results.size() << "logs";
-
-    db.close();
-    QSqlDatabase::removeDatabase(connectionName);
-
-    result.success = true;
-    return result;
 }

@@ -1,5 +1,6 @@
 #include "coordinatetransformer.h"
 #include "logutils.h"
+#include "logquerytask.h"
 #include <QPointF>
 #include <QMetaType>
 #include <QSet>
@@ -253,8 +254,6 @@ void MainWindow::connectSignals()
             this, &MainWindow::onOdometryReceived);
     connect(m_robotStatusThread.get(), &RobotStatusThread::systemTimeReceived,
             this, &MainWindow::onSystemTimeReceived);
-    connect(m_robotStatusThread.get(), &RobotStatusThread::diagnosticsReceived,
-            this, &MainWindow::onDiagnosticsReceived);
     connect(m_robotStatusThread.get(), &RobotStatusThread::connectionStateChanged,
             this, &MainWindow::onConnectionStateChanged);
 
@@ -286,13 +285,6 @@ void MainWindow::connectSignals()
             this, &MainWindow::onBehaviorTreeLogReceived);
     connect(m_systemMonitorThread.get(), &SystemMonitorThread::connectionStateChanged,
             this, &MainWindow::onConnectionStateChanged);
-
-    // SystemMonitorThread日志转发给LogThread统一存储
-    connect(m_systemMonitorThread.get(), &SystemMonitorThread::logMessageReceived,
-            m_logThread.get(), [this](const QString& message, int level, const QDateTime& timestamp) {
-        LogEntry entry(message, static_cast<LogLevel>(level), timestamp, "SystemMonitor");
-        m_logThread->writeLogEntry(entry);
-    });
 
     // RobotStatusThread的诊断信息转发给SystemMonitorThread
     connect(m_robotStatusThread.get(), &RobotStatusThread::diagnosticsReceived,
@@ -637,34 +629,6 @@ void MainWindow::onSystemTimeReceived(const QString& time)
         ui->labelCurrentTime->setText(time);
     }
     ui->statusbar->showMessage(QString("系统时间: %1").arg(time));
-}
-
-void MainWindow::onDiagnosticsReceived(const QString& status, int level, const QString& message)
-{
-    LogLevel logLevel = LogLevel::INFO;
-    if (level == 1) logLevel = LogLevel::WARNING;
-    else if (level == 2) logLevel = LogLevel::ERROR;
-    else if (level == 3) logLevel = LogLevel::FATAL;
-    else if (level == 4) logLevel = LogLevel::DEBUG;
-
-    if (message.contains("Nav2 is active")) {
-        logLevel = LogLevel::HIGHFREQ;
-    }
-
-    // 去掉状态名中的 ": Nav2 Health" 后缀，使格式更简洁
-    QString simplifiedStatus = status;
-    if (status.contains(": Nav2 Health")) {
-        simplifiedStatus = status.left(status.indexOf(": Nav2 Health"));
-    }
-
-    // 将诊断信息格式化为 "消息 from 状态名 [/diagnostics]" 的形式
-    QString logMessage = QString("%1 from %2 [/diagnostics]").arg(message).arg(simplifiedStatus);
-    LogEntry entry(logMessage, logLevel, QDateTime::currentDateTime(), "RobotStatus");
-    addLogEntry(entry);
-
-    if (level >= 2) {
-        ui->statusbar->showMessage(QString("诊断警告: %1").arg(message), 5000);
-    }
 }
 
 // ==================== NavStatusThread槽函数 ====================
@@ -1767,6 +1731,11 @@ void MainWindow::addLogEntry(const LogEntry& entry)
         return;
     }
 
+    // 写入日志线程（存储到文件和数据库）
+    if (m_logThread) {
+        m_logThread->writeLogEntry(entry);
+    }
+
     // 高频日志：独立存储，也进入 UI 显示
     if (entry.level == LogLevel::HIGHFREQ) {
         m_highFreqLogs.append(entry);
@@ -1830,7 +1799,6 @@ void MainWindow::onHistoryLogQuery()
         return;
     }
 
-    LogLevel minLevel = getMinLogLevel(levels);
     QString source = ui->sourceComboBox->currentText();
     if (source == "全部") source.clear();
     QString keyword = ui->keywordLineEdit->text();
@@ -1838,7 +1806,7 @@ void MainWindow::onHistoryLogQuery()
 
     m_lastQueryStartTime = startTime;
     m_lastQueryEndTime = endTime;
-    m_lastQueryMinLevel = minLevel;
+    m_lastQuerySelectedLevels = levels;
     m_lastQuerySource = source;
     m_lastQueryKeyword = keyword;
     m_hasValidQuery = true;
@@ -1846,15 +1814,19 @@ void MainWindow::onHistoryLogQuery()
     ui->queryButton->setEnabled(false);
     ui->queryButton->setText(tr("查询中..."));
 
+    bool includeHighFreq = levels.contains(static_cast<int>(LogLevel::HIGHFREQ));
+    m_lastQueryIncludeHighFreq = includeHighFreq;
+
     LogQueryParams params;
     params.dbPath = m_logStorage->getDbPath();
     params.startTime = startTime;
     params.endTime = endTime;
-    params.minLevel = minLevel;
+    params.selectedLevels = levels.values().toVector();
     params.source = source;
     params.keyword = keyword;
     params.limit = pageSize;
     params.offset = 0;
+    params.includeHighFreq = includeHighFreq;
 
     QFuture<LogQueryResult> future = QtConcurrent::run([params]() {
         return LogQueryTask::execute(params);
@@ -1874,8 +1846,7 @@ void MainWindow::onHistoryLogQueryFinished()
         return;
     }
 
-    int totalCount = m_logStorage->getLogCount(m_lastQueryStartTime,
-        m_lastQueryEndTime, m_lastQueryMinLevel);
+    int totalCount = result.totalCount;
 
     m_historyLogTableModel->setQueryResults(result.results);
     m_historyLogTableModel->setPaginationInfo(totalCount, 1, ui->pageSizeComboBox->currentText().toInt());
@@ -1930,11 +1901,12 @@ void MainWindow::loadHistoryPage(int page)
     params.dbPath = m_logStorage->getDbPath();
     params.startTime = m_lastQueryStartTime;
     params.endTime = m_lastQueryEndTime;
-    params.minLevel = m_lastQueryMinLevel;
+    params.selectedLevels = m_lastQuerySelectedLevels.values().toVector();
     params.source = m_lastQuerySource;
     params.keyword = m_lastQueryKeyword;
     params.limit = pageSize;
     params.offset = offset;
+    params.includeHighFreq = m_lastQueryIncludeHighFreq;
 
     QFuture<LogQueryResult> future = QtConcurrent::run([params]() {
         return LogQueryTask::execute(params);
@@ -2090,6 +2062,15 @@ bool MainWindow::exportHistoryLogs(const QString& filePath, bool isCsv)
     QTextStream out(&file);
     out.setCodec(QTextCodec::codecForName("UTF-8"));
 
+    LogQueryParams params;
+    params.dbPath = m_logStorage->getDbPath();
+    params.startTime = m_lastQueryStartTime;
+    params.endTime = m_lastQueryEndTime;
+    params.selectedLevels = m_lastQuerySelectedLevels.values().toVector();
+    params.source = m_lastQuerySource;
+    params.keyword = m_lastQueryKeyword;
+    params.includeHighFreq = m_lastQueryIncludeHighFreq;
+
     if (isCsv) {
         out << "\xEF\xBB\xBF";
         out << "时间,级别,来源,消息\n";
@@ -2097,11 +2078,11 @@ bool MainWindow::exportHistoryLogs(const QString& filePath, bool isCsv)
         int totalCount = m_historyLogTableModel->getTotalCount();
         int pageSize = 500;
         for (int offset = 0; offset < totalCount; offset += pageSize) {
-            QVector<StorageLogEntry> entries = m_logStorage->queryLogs(
-                m_lastQueryStartTime, m_lastQueryEndTime, m_lastQueryMinLevel,
-                m_lastQuerySource, m_lastQueryKeyword, pageSize, offset);
+            params.limit = pageSize;
+            params.offset = offset;
+            LogQueryResult result = LogQueryTask::execute(params);
 
-            for (const auto& entry : entries) {
+            for (const auto& entry : result.results) {
                 QString msg = entry.message;
                 msg.replace("\"", "\"\"");
                 out << "\"" << entry.timestamp.toString("yyyy-MM-dd hh:mm:ss.zzz") << "\","
@@ -2114,7 +2095,11 @@ bool MainWindow::exportHistoryLogs(const QString& filePath, bool isCsv)
         out << "历史日志导出\n";
         out << "时间范围: " << m_lastQueryStartTime.toString("yyyy-MM-dd hh:mm:ss")
             << " 至 " << m_lastQueryEndTime.toString("yyyy-MM-dd hh:mm:ss") << "\n";
-        out << "最低级别: " << LogUtils::levelToString(m_lastQueryMinLevel) << "\n";
+        QStringList levelNames;
+        for (int level : m_lastQuerySelectedLevels) {
+            levelNames << LogUtils::levelToString(static_cast<LogLevel>(level));
+        }
+        out << "选中级别: " << levelNames.join(", ") << "\n";
         if (!m_lastQuerySource.isEmpty()) {
             out << "来源: " << m_lastQuerySource << "\n";
         }
@@ -2126,11 +2111,11 @@ bool MainWindow::exportHistoryLogs(const QString& filePath, bool isCsv)
         int totalCount = m_historyLogTableModel->getTotalCount();
         int pageSize = 500;
         for (int offset = 0; offset < totalCount; offset += pageSize) {
-            QVector<StorageLogEntry> entries = m_logStorage->queryLogs(
-                m_lastQueryStartTime, m_lastQueryEndTime, m_lastQueryMinLevel,
-                m_lastQuerySource, m_lastQueryKeyword, pageSize, offset);
+            params.limit = pageSize;
+            params.offset = offset;
+            LogQueryResult result = LogQueryTask::execute(params);
 
-            for (const auto& entry : entries) {
+            for (const auto& entry : result.results) {
                 out << "[" << entry.timestamp.toString("yyyy-MM-dd hh:mm:ss.zzz") << "] "
                     << "[" << LogUtils::levelToString(entry.level) << "] "
                     << "[" << (entry.source.isEmpty() ? "系统" : entry.source) << "] "

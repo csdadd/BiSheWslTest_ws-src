@@ -80,6 +80,13 @@ void LogThread::cleanup()
 {
     processLogQueue();
 
+    if (!m_pendingBatchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
+        if (!m_storageEngine->insertLogs(m_pendingBatchEntries)) {
+            qWarning() << "[LogThread] Failed to insert remaining logs to database during cleanup";
+        }
+        m_pendingBatchEntries.clear();
+    }
+
     QMutexLocker locker(&m_fileMutex);
     if (m_logFile.isOpen()) {
         m_logStream.flush();
@@ -102,20 +109,12 @@ void LogThread::writeLogEntry(const LogEntry& entry)
 
 void LogThread::processLogQueue()
 {
-    QVector<StorageLogEntry> batchEntries;
     QVector<StorageLogEntry> highFreqBatchEntries;
     QVector<StorageLogEntry> odometryBatchEntries;
     LogEntry entry;
 
     while (m_logQueue.tryDequeue(entry, 0)) {
         if (entry.level == LogLevel::HIGHFREQ) {
-            if (entry.message.contains("Nav2 is active")) {
-                m_nav2ActiveLogCount++;
-                if (m_nav2ActiveLogCount % 200 != 1) {
-                    continue;
-                }
-            }
-
             StorageLogEntry storageEntry(
                 entry.message,
                 entry.level,
@@ -124,7 +123,7 @@ void LogThread::processLogQueue()
             );
             highFreqBatchEntries.append(storageEntry);
 
-            if (highFreqBatchEntries.size() >= 50) {
+            if (highFreqBatchEntries.size() >= 4) {
                 if (m_storageEngine && m_storageEngine->isInitialized()) {
                     if (!m_storageEngine->insertHighFreqLogs(highFreqBatchEntries)) {
                         qWarning() << "[LogThread] Failed to insert high freq logs to database, will retry next cycle";
@@ -133,11 +132,6 @@ void LogThread::processLogQueue()
                 highFreqBatchEntries.clear();
             }
         } else if (entry.level == LogLevel::ODOMETRY) {
-            m_odometryLogCount++;
-            if (m_odometryLogCount % 10 != 1) {
-                continue;
-            }
-
             StorageLogEntry storageEntry(
                 entry.message,
                 entry.level,
@@ -146,7 +140,7 @@ void LogThread::processLogQueue()
             );
             odometryBatchEntries.append(storageEntry);
 
-            if (odometryBatchEntries.size() >= 50) {
+            if (odometryBatchEntries.size() >= 100) {
                 if (m_storageEngine && m_storageEngine->isInitialized()) {
                     if (!m_storageEngine->insertOdometryLogs(odometryBatchEntries)) {
                         qWarning() << "[LogThread] Failed to insert odometry logs to database, will retry next cycle";
@@ -163,22 +157,7 @@ void LogThread::processLogQueue()
                 entry.timestamp,
                 entry.source
             );
-            batchEntries.append(storageEntry);
-
-            if (batchEntries.size() >= 100) {
-                if (m_storageEngine && m_storageEngine->isInitialized()) {
-                    if (!m_storageEngine->insertLogs(batchEntries)) {
-                        qWarning() << "[LogThread] Failed to insert logs to database, will retry next cycle";
-                    }
-                }
-                batchEntries.clear();
-            }
-        }
-    }
-
-    if (!batchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
-        if (!m_storageEngine->insertLogs(batchEntries)) {
-            qWarning() << "[LogThread] Failed to insert remaining logs to database, will retry next cycle";
+            m_pendingBatchEntries.append(storageEntry);
         }
     }
 
@@ -191,6 +170,23 @@ void LogThread::processLogQueue()
     if (!odometryBatchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
         if (!m_storageEngine->insertOdometryLogs(odometryBatchEntries)) {
             qWarning() << "[LogThread] Failed to insert remaining odometry logs to database, will retry next cycle";
+        }
+    }
+
+    QDateTime now = QDateTime::currentDateTime();
+    if (!m_lastBatchWriteTime.isValid()) {
+        m_lastBatchWriteTime = now;
+    }
+
+    if (!m_pendingBatchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
+        qint64 elapsedMs = m_lastBatchWriteTime.msecsTo(now);
+        if (elapsedMs >= BATCH_WRITE_INTERVAL_MS) {
+            if (!m_storageEngine->insertLogs(m_pendingBatchEntries)) {
+                qWarning() << "[LogThread] Failed to insert logs to database, will retry next cycle";
+            } else {
+                m_pendingBatchEntries.clear();
+            }
+            m_lastBatchWriteTime = now;
         }
     }
 }
