@@ -104,12 +104,18 @@ void LogThread::processLogQueue()
 {
     QVector<StorageLogEntry> batchEntries;
     QVector<StorageLogEntry> highFreqBatchEntries;
+    QVector<StorageLogEntry> odometryBatchEntries;
     LogEntry entry;
 
     while (m_logQueue.tryDequeue(entry, 0)) {
-        // 根据日志级别判断是否为高频日志
         if (entry.level == LogLevel::HIGHFREQ) {
-            // 高频日志只写数据库，不写文件
+            if (entry.message.contains("Nav2 is active")) {
+                m_nav2ActiveLogCount++;
+                if (m_nav2ActiveLogCount % 200 != 1) {
+                    continue;
+                }
+            }
+
             StorageLogEntry storageEntry(
                 entry.message,
                 entry.level,
@@ -125,6 +131,28 @@ void LogThread::processLogQueue()
                     }
                 }
                 highFreqBatchEntries.clear();
+            }
+        } else if (entry.level == LogLevel::ODOMETRY) {
+            m_odometryLogCount++;
+            if (m_odometryLogCount % 10 != 1) {
+                continue;
+            }
+
+            StorageLogEntry storageEntry(
+                entry.message,
+                entry.level,
+                entry.timestamp,
+                entry.source
+            );
+            odometryBatchEntries.append(storageEntry);
+
+            if (odometryBatchEntries.size() >= 50) {
+                if (m_storageEngine && m_storageEngine->isInitialized()) {
+                    if (!m_storageEngine->insertOdometryLogs(odometryBatchEntries)) {
+                        qWarning() << "[LogThread] Failed to insert odometry logs to database, will retry next cycle";
+                    }
+                }
+                odometryBatchEntries.clear();
             }
         } else {
             writeToFile(entry.message, entry.level, entry.timestamp, entry.source);
@@ -157,6 +185,12 @@ void LogThread::processLogQueue()
     if (!highFreqBatchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
         if (!m_storageEngine->insertHighFreqLogs(highFreqBatchEntries)) {
             qWarning() << "[LogThread] Failed to insert remaining high freq logs to database, will retry next cycle";
+        }
+    }
+
+    if (!odometryBatchEntries.isEmpty() && m_storageEngine && m_storageEngine->isInitialized()) {
+        if (!m_storageEngine->insertOdometryLogs(odometryBatchEntries)) {
+            qWarning() << "[LogThread] Failed to insert remaining odometry logs to database, will retry next cycle";
         }
     }
 }

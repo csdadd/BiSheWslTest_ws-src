@@ -119,11 +119,6 @@ QVariant LogTableModel::headerData(int section, Qt::Orientation orientation, int
 
 void LogTableModel::addLogEntry(const LogEntry& entry)
 {
-    // 过滤高频日志，不添加到 UI 显示模型
-    if (entry.level == LogLevel::HIGHFREQ) {
-        return;
-    }
-
     m_pendingLogs.append(entry);
 
     // 如果批量更新未启用或待处理日志超过阈值，立即刷新
@@ -138,21 +133,8 @@ void LogTableModel::addLogEntries(const QVector<LogEntry>& entries)
         return;
     }
 
-    // 过滤高频日志
-    QVector<LogEntry> filteredEntries;
-    filteredEntries.reserve(entries.size());
-    for (const auto& entry : entries) {
-        if (entry.level != LogLevel::HIGHFREQ) {
-            filteredEntries.append(entry);
-        }
-    }
-
-    if (filteredEntries.isEmpty()) {
-        return;
-    }
-
-    beginInsertRows(QModelIndex(), m_logs.size(), m_logs.size() + filteredEntries.size() - 1);
-    m_logs += filteredEntries;
+    beginInsertRows(QModelIndex(), m_logs.size(), m_logs.size() + entries.size() - 1);
+    m_logs += entries;
     endInsertRows();
 
     enforceMaxLogs();

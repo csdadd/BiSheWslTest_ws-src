@@ -185,11 +185,12 @@ private:
     // 设计目的：分离数据缓存层(m_allLogs)和显示层(m_logTableModel)，使得内存中保留更多历史日志，
     //          而UI显示保持轻量，避免界面卡顿
     // 注意：不包含高频日志(HIGHFREQ)，高频日志有独立缓存 m_highFreqLogs
+    // 里程计日志(ODOMETRY)不显示在 UI 中，直接存储到独立数据库表
     QList<LogEntry> m_allLogs;
     static constexpr int MAX_ALL_LOGS_SIZE = 10000;
 
     // 高频日志独立缓存（最大 1,000 条）
-    // 设计目的：高频日志(如里程计数据)独立存储，不占用主日志缓存和 UI 显示资源
+    // 设计目的：高频日志独立存储，不占用主日志缓存和 UI 显示资源
     QList<LogEntry> m_highFreqLogs;
     static constexpr int MAX_HIGHFREQ_LOGS_SIZE = 1000;
 

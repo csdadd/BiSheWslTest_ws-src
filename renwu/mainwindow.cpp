@@ -624,7 +624,7 @@ void MainWindow::onOdometryReceived(double x, double y, double yaw, double vx, d
     QString message = QString("里程计 - 位置(X:%1, Y:%2, Yaw:%3), 速度(vx:%4, vy:%5, omega:%6)")
         .arg(x, 0, 'f', 2).arg(y, 0, 'f', 2).arg(yaw, 0, 'f', 2)
         .arg(vx, 0, 'f', 2).arg(vy, 0, 'f', 2).arg(omega, 0, 'f', 2);
-    LogEntry entry(message, LogLevel::HIGHFREQ, QDateTime::currentDateTime(), "RobotStatus");
+    LogEntry entry(message, LogLevel::ODOMETRY, QDateTime::currentDateTime(), "RobotStatus");
     addLogEntry(entry);
 }
 
@@ -1762,12 +1762,19 @@ void MainWindow::addLogEntry(const LogEntry& entry)
         return;
     }
 
-    // 高频日志：独立存储，不进入主日志流
+    // 里程计日志：不显示在 UI 中，直接返回（由 LogThread 负责存储到独立数据库表）
+    if (entry.level == LogLevel::ODOMETRY) {
+        return;
+    }
+
+    // 高频日志：独立存储，也进入 UI 显示
     if (entry.level == LogLevel::HIGHFREQ) {
         m_highFreqLogs.append(entry);
         if (m_highFreqLogs.size() > MAX_HIGHFREQ_LOGS_SIZE) {
             m_highFreqLogs.removeFirst();
         }
+        m_logTableModel->addLogEntry(entry);
+        ui->logTableView->scrollToBottom();
         return;
     }
 

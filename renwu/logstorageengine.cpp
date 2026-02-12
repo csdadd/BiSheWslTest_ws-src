@@ -122,6 +122,26 @@ bool LogStorageEngine::createTables()
         return false;
     }
 
+    QString createOdometryTableSQL = R"(
+        CREATE TABLE IF NOT EXISTS odometry_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp INTEGER NOT NULL,
+            level INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            source TEXT,
+            category TEXT,
+            file_path TEXT,
+            line_number INTEGER,
+            created_at INTEGER DEFAULT (strftime('%s', 'now'))
+        )
+    )";
+
+    if (!query.exec(createOdometryTableSQL)) {
+        m_lastError = QString("Failed to create odometry_logs table: %1").arg(query.lastError().text());
+        emit errorOccurred(m_lastError);
+        return false;
+    }
+
     return true;
 }
 
@@ -168,6 +188,21 @@ bool LogStorageEngine::createIndexes()
     QString createHfSourceIndex = "CREATE INDEX IF NOT EXISTS idx_hf_source ON high_freq_logs(source)";
     if (!query.exec(createHfSourceIndex)) {
         m_lastError = QString("Failed to create high_freq source index: %1").arg(query.lastError().text());
+        emit errorOccurred(m_lastError);
+        return false;
+    }
+
+    // 里程计日志表索引
+    QString createOdomTimestampIndex = "CREATE INDEX IF NOT EXISTS idx_odom_timestamp ON odometry_logs(timestamp)";
+    if (!query.exec(createOdomTimestampIndex)) {
+        m_lastError = QString("Failed to create odometry timestamp index: %1").arg(query.lastError().text());
+        emit errorOccurred(m_lastError);
+        return false;
+    }
+
+    QString createOdomSourceIndex = "CREATE INDEX IF NOT EXISTS idx_odom_source ON odometry_logs(source)";
+    if (!query.exec(createOdomSourceIndex)) {
+        m_lastError = QString("Failed to create odometry source index: %1").arg(query.lastError().text());
         emit errorOccurred(m_lastError);
         return false;
     }
@@ -673,5 +708,57 @@ bool LogStorageEngine::clearHighFreqLogs(const QDateTime& beforeTime)
     }
 
     qDebug() << "[LogStorageEngine] Cleared high freq logs, affected rows:" << query.numRowsAffected();
+    return true;
+}
+
+bool LogStorageEngine::insertOdometryLogs(const QVector<StorageLogEntry>& entries)
+{
+    QWriteLocker locker(&m_lock);
+
+    if (!m_initialized || !m_database.isOpen()) {
+        m_lastError = "Database not initialized";
+        return false;
+    }
+
+    if (entries.isEmpty()) {
+        return true;
+    }
+
+    QSqlQuery query(m_database);
+    query.prepare(R"(
+        INSERT INTO odometry_logs (timestamp, level, message, source, category, file_path, line_number)
+        VALUES (?, ?, ?, ?, '', ?, ?)
+    )");
+
+    if (!m_database.transaction()) {
+        m_lastError = QString("Failed to start transaction: %1").arg(m_database.lastError().text());
+        emit errorOccurred(m_lastError);
+        return false;
+    }
+
+    int successCount = 0;
+    for (const auto& entry : entries) {
+        query.addBindValue(entry.timestamp.toMSecsSinceEpoch());
+        query.addBindValue(static_cast<int>(entry.level));
+        query.addBindValue(entry.message);
+        query.addBindValue(entry.source);
+        query.addBindValue(entry.filePath);
+        query.addBindValue(entry.lineNumber);
+
+        if (query.exec()) {
+            successCount++;
+        } else {
+            qDebug() << "[LogStorageEngine] Failed to insert odometry log:" << query.lastError().text();
+        }
+    }
+
+    if (!m_database.commit()) {
+        m_lastError = QString("Failed to commit transaction: %1").arg(m_database.lastError().text());
+        emit errorOccurred(m_lastError);
+        m_database.rollback();
+        return false;
+    }
+
+    emit logInserted(successCount);
     return true;
 }

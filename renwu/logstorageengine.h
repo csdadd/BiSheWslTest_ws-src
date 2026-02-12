@@ -76,6 +76,9 @@ public:
 
     bool clearHighFreqLogs(const QDateTime& beforeTime = QDateTime());
 
+    // 里程计日志相关方法
+    bool insertOdometryLogs(const QVector<StorageLogEntry>& entries);
+
 signals:
     void logInserted(int count);
     void logQueryCompleted(int count);
