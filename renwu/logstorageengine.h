@@ -9,6 +9,8 @@
 #include <QReadWriteLock>
 #include <QSqlDatabase>
 #include <QSqlError>
+#include <QTimer>
+#include <QFileInfo>
 
 // 使用统一的LogLevel定义
 using StorageLogLevel = LogLevel;
@@ -30,6 +32,17 @@ struct StorageLogEntry {
 
 Q_DECLARE_METATYPE(StorageLogEntry)
 Q_DECLARE_METATYPE(QVector<StorageLogEntry>)
+
+// 日志保留策略配置
+struct RetentionPolicy {
+    int retentionDays = 30;         // 普通日志保留天数
+    int highFreqRetentionDays = 10; // 高频日志保留天数
+    int odometryRetentionDays = 3;  // 里程计保留天数
+    qint64 maxDbSizeMB = 500;       // 数据库最大大小（MB）
+    int cleanupIntervalHours = 24;  // 定时清理间隔（小时）
+
+    RetentionPolicy() = default;
+};
 
 class LogStorageEngine : public QObject
 {
@@ -78,11 +91,22 @@ public:
 
     // 里程计日志相关方法
     bool insertOdometryLogs(const QVector<StorageLogEntry>& entries);
+    bool clearOdometryLogs(const QDateTime& beforeTime = QDateTime());
+
+    // 自动清理相关方法
+    void setRetentionPolicy(const RetentionPolicy& policy);
+    RetentionPolicy retentionPolicy() const;
+    void startAutoCleanup();
+    void stopAutoCleanup();
+    bool performCleanup();
+    qint64 getDatabaseSize() const;
+    double getDatabaseSizeMB() const;
 
 signals:
     void logInserted(int count);
     void logQueryCompleted(int count);
     void errorOccurred(const QString& error);
+    void cleanupCompleted(int logsRemoved, int highFreqRemoved, int odometryRemoved, qint64 bytesFreed);
 
 private:
     bool createTables();
@@ -96,6 +120,14 @@ private:
     mutable QReadWriteLock m_lock;
     QString m_lastError;
     static constexpr int BATCH_INSERT_SIZE = 100;
+
+    // 自动清理相关成员
+    RetentionPolicy m_retentionPolicy;
+    QTimer* m_cleanupTimer = nullptr;
+
+    // 内部清理辅助方法
+    bool cleanupByRetentionPolicy();
+    bool cleanupBySizeLimit();
 };
 
 #endif // LOGSTORAGEENGINE_H

@@ -232,6 +232,9 @@ void MainWindow::initializeThreads()
     QString dbPath = QCoreApplication::applicationDirPath() + "/logs/unified_logs.db";
     if (!m_logStorage->initialize(dbPath)) {
         qWarning() << "[MainWindow] Failed to initialize LogStorageEngine:" << m_logStorage->getLastError();
+    } else {
+        // 启动自动清理
+        m_logStorage->startAutoCleanup();
     }
 
     m_robotStatusThread = std::make_unique<RobotStatusThread>(this);

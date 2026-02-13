@@ -16,6 +16,8 @@ LogStorageEngine::LogStorageEngine(QObject* parent)
 
 LogStorageEngine::~LogStorageEngine()
 {
+    stopAutoCleanup();
+
     if (m_database.isOpen()) {
         m_database.close();
     }
@@ -761,4 +763,201 @@ bool LogStorageEngine::insertOdometryLogs(const QVector<StorageLogEntry>& entrie
 
     emit logInserted(successCount);
     return true;
+}
+
+// ============== 里程计日志清理 ==============
+
+bool LogStorageEngine::clearOdometryLogs(const QDateTime& beforeTime)
+{
+    QWriteLocker locker(&m_lock);
+
+    if (!m_initialized || !m_database.isOpen()) {
+        m_lastError = "Database not initialized";
+        return false;
+    }
+
+    QSqlQuery query(m_database);
+
+    if (beforeTime.isValid()) {
+        query.prepare("DELETE FROM odometry_logs WHERE timestamp < ?");
+        query.addBindValue(beforeTime.toMSecsSinceEpoch());
+    } else {
+        query.prepare("DELETE FROM odometry_logs");
+    }
+
+    if (!query.exec()) {
+        m_lastError = QString("Failed to clear odometry logs: %1").arg(query.lastError().text());
+        emit errorOccurred(m_lastError);
+        return false;
+    }
+
+    qDebug() << "[LogStorageEngine] Cleared odometry logs, affected rows:" << query.numRowsAffected();
+    return true;
+}
+
+// ============== 保留策略管理 ==============
+
+void LogStorageEngine::setRetentionPolicy(const RetentionPolicy& policy)
+{
+    m_retentionPolicy = policy;
+
+    // 如果定时器已启动，更新间隔
+    if (m_cleanupTimer && m_cleanupTimer->isActive()) {
+        m_cleanupTimer->setInterval(m_retentionPolicy.cleanupIntervalHours * 3600 * 1000);
+    }
+}
+
+RetentionPolicy LogStorageEngine::retentionPolicy() const
+{
+    return m_retentionPolicy;
+}
+
+// ============== 自动清理控制 ==============
+
+void LogStorageEngine::startAutoCleanup()
+{
+    // 创建定时器（如果不存在）
+    if (!m_cleanupTimer) {
+        m_cleanupTimer = new QTimer(this);
+        connect(m_cleanupTimer, &QTimer::timeout, this, [this]() {
+            qDebug() << "[LogStorageEngine] Scheduled cleanup triggered";
+            performCleanup();
+        });
+    }
+
+    // 启动时立即执行一次清理
+    qDebug() << "[LogStorageEngine] Performing startup cleanup...";
+    performCleanup();
+
+    // 启动定时清理（间隔单位：小时 -> 毫秒）
+    int intervalMs = m_retentionPolicy.cleanupIntervalHours * 3600 * 1000;
+    m_cleanupTimer->start(intervalMs);
+
+    qDebug() << "[LogStorageEngine] Auto cleanup started, interval:"
+             << m_retentionPolicy.cleanupIntervalHours << "hours";
+}
+
+void LogStorageEngine::stopAutoCleanup()
+{
+    if (m_cleanupTimer) {
+        m_cleanupTimer->stop();
+        delete m_cleanupTimer;
+        m_cleanupTimer = nullptr;
+        qDebug() << "[LogStorageEngine] Auto cleanup stopped";
+    }
+}
+
+// ============== 核心清理逻辑 ==============
+
+bool LogStorageEngine::performCleanup()
+{
+    if (!m_initialized || !m_database.isOpen()) {
+        m_lastError = "Database not initialized";
+        emit errorOccurred(m_lastError);
+        return false;
+    }
+
+    qint64 sizeBefore = getDatabaseSize();
+
+    // 1. 按保留时间清理
+    if (!cleanupByRetentionPolicy()) {
+        return false;
+    }
+
+    // 2. 检查数据库大小，必要时按大小清理
+    if (getDatabaseSizeMB() > m_retentionPolicy.maxDbSizeMB) {
+        if (!cleanupBySizeLimit()) {
+            return false;
+        }
+    }
+
+    // 3. 执行 vacuum 压缩数据库
+    vacuum();
+
+    qint64 sizeAfter = getDatabaseSize();
+    qint64 bytesFreed = sizeBefore - sizeAfter;
+
+    qDebug() << "[LogStorageEngine] Cleanup completed, freed:" << bytesFreed << "bytes";
+    emit cleanupCompleted(0, 0, 0, bytesFreed);
+
+    return true;
+}
+
+bool LogStorageEngine::cleanupByRetentionPolicy()
+{
+    QDateTime now = QDateTime::currentDateTime();
+
+    // 清理普通日志（保留 retentionDays 天）
+    QDateTime logsCutoff = now.addDays(-m_retentionPolicy.retentionDays);
+    if (!clearLogs(logsCutoff)) {
+        qWarning() << "[LogStorageEngine] Failed to clear logs by retention policy";
+    }
+
+    // 清理高频日志（保留 highFreqRetentionDays 天）
+    QDateTime highFreqCutoff = now.addDays(-m_retentionPolicy.highFreqRetentionDays);
+    if (!clearHighFreqLogs(highFreqCutoff)) {
+        qWarning() << "[LogStorageEngine] Failed to clear high freq logs by retention policy";
+    }
+
+    // 清理里程计日志（保留 odometryRetentionDays 天）
+    QDateTime odometryCutoff = now.addDays(-m_retentionPolicy.odometryRetentionDays);
+    if (!clearOdometryLogs(odometryCutoff)) {
+        qWarning() << "[LogStorageEngine] Failed to clear odometry logs by retention policy";
+    }
+
+    return true;
+}
+
+bool LogStorageEngine::cleanupBySizeLimit()
+{
+    QWriteLocker locker(&m_lock);
+
+    if (!m_initialized || !m_database.isOpen()) {
+        m_lastError = "Database not initialized";
+        return false;
+    }
+
+    // 目标大小为最大限制的 80%，留出缓冲空间
+    qint64 targetSizeBytes = static_cast<qint64>(m_retentionPolicy.maxDbSizeMB * 0.8 * 1024 * 1024);
+
+    QSqlQuery query(m_database);
+
+    // 辅助 lambda：删除指定表最旧的一半数据
+    auto deleteOldestHalf = [&](const QString &table) {
+        QString sql = QString("DELETE FROM %1 WHERE id IN "
+                              "(SELECT id FROM %1 ORDER BY timestamp ASC LIMIT "
+                              "(SELECT COUNT(*)/2 FROM %1))").arg(table);
+        return query.exec(sql);
+    };
+
+    // 优先删除里程计（占用大、价值低），然后高频日志，最后普通日志
+    deleteOldestHalf("odometry_logs");
+    if (getDatabaseSize() <= targetSizeBytes) {
+        return true;
+    }
+
+    deleteOldestHalf("high_freq_logs");
+    if (getDatabaseSize() <= targetSizeBytes) {
+        return true;
+    }
+
+    deleteOldestHalf("logs");
+    return true;
+}
+
+// ============== 数据库大小查询 ==============
+
+qint64 LogStorageEngine::getDatabaseSize() const
+{
+    if (m_dbPath.isEmpty()) {
+        return 0;
+    }
+
+    QFileInfo fileInfo(m_dbPath);
+    return fileInfo.size();
+}
+
+double LogStorageEngine::getDatabaseSizeMB() const
+{
+    return static_cast<double>(getDatabaseSize()) / (1024.0 * 1024.0);
 }
