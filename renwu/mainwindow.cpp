@@ -786,7 +786,7 @@ void MainWindow::onClearLogByLevel()
     // 从内存中清除对应级别的日志（仅影响显示，不影响数据库和文件中的日志）
     int clearedCount = 0;
 
-    // 清除普通日志缓存
+    // 清除日志缓存
     for (auto it = m_allLogs.begin(); it != m_allLogs.end(); ) {
         if (levelsToClear.contains(static_cast<int>(it->level))) {
             it = m_allLogs.erase(it);
@@ -794,12 +794,6 @@ void MainWindow::onClearLogByLevel()
         } else {
             ++it;
         }
-    }
-
-    // 清除高频日志缓存
-    if (levelsToClear.contains(static_cast<int>(LogLevel::HIGHFREQ))) {
-        clearedCount += m_highFreqLogs.size();
-        m_highFreqLogs.clear();
     }
 
     // 刷新模型显示
@@ -1736,18 +1730,7 @@ void MainWindow::addLogEntry(const LogEntry& entry)
         m_logThread->writeLogEntry(entry);
     }
 
-    // 高频日志：独立存储，也进入 UI 显示
-    if (entry.level == LogLevel::HIGHFREQ) {
-        m_highFreqLogs.append(entry);
-        if (m_highFreqLogs.size() > MAX_HIGHFREQ_LOGS_SIZE) {
-            m_highFreqLogs.removeFirst();
-        }
-        m_logTableModel->addLogEntry(entry);
-        ui->logTableView->scrollToBottom();
-        return;
-    }
-
-    // 普通日志：添加到内存缓存 (最大 10000 条，用于日志管理操作)
+    // 添加到内存缓存 (最大 10000 条，用于日志管理操作)
     m_allLogs.append(entry);
 
     if (m_allLogs.size() > MAX_ALL_LOGS_SIZE) {
