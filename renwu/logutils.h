@@ -35,6 +35,8 @@ inline QString levelToString(LogLevel level) {
             return "HIGHFREQ";
         case LogLevel::ODOMETRY:
             return "ODOMETRY";
+        case LogLevel::COLLISION:
+            return "COLLISION";
         default:
             return "UNKNOWN";
     }
@@ -54,6 +56,7 @@ inline LogLevel levelFromString(const QString& levelStr) {
     if (upper == "FATAL") return LogLevel::FATAL;
     if (upper == "HIGHFREQ") return LogLevel::HIGHFREQ;
     if (upper == "ODOMETRY") return LogLevel::ODOMETRY;
+    if (upper == "COLLISION") return LogLevel::COLLISION;
     return LogLevel::INFO;  // 默认级别
 }
 

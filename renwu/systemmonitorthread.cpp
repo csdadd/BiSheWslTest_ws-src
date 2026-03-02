@@ -154,7 +154,7 @@ void SystemMonitorThread::processCollisionData(const sensor_msgs::msg::PointClou
         QDateTime timestamp = QDateTime::currentDateTime();
 
         emit collisionDetected(message);
-        emit logMessageReceived(message, static_cast<int>(LogLevel::ERROR), timestamp);
+        emit logMessageReceived(message, static_cast<int>(LogLevel::COLLISION), timestamp);
     }
 }
 

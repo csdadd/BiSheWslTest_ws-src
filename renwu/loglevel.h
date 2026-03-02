@@ -14,7 +14,8 @@ enum class LogLevel : int {
     ERROR = 3,
     FATAL = 4,
     HIGHFREQ = 5,  // 高频日志级别
-    ODOMETRY = 6   // 里程计日志级别
+    ODOMETRY = 6,  // 里程计日志级别
+    COLLISION = 7  // 碰撞检测日志级别
 };
 
 // 为了保持向后兼容性，提供内联常量
@@ -25,5 +26,6 @@ inline constexpr LogLevel LOG_ERROR = LogLevel::ERROR;
 inline constexpr LogLevel LOG_FATAL = LogLevel::FATAL;
 inline constexpr LogLevel LOG_HIGHFREQ = LogLevel::HIGHFREQ;
 inline constexpr LogLevel LOG_ODOMETRY = LogLevel::ODOMETRY;
+inline constexpr LogLevel LOG_COLLISION = LogLevel::COLLISION;
 
 #endif // LOGLEVEL_H

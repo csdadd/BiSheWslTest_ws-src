@@ -769,6 +769,28 @@
             </widget>
            </item>
            <item row="0" column="6">
+            <widget class="QCheckBox" name="collisionCheckBox">
+             <property name="minimumSize">
+              <size>
+               <width>100</width>
+               <height>28</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>100</width>
+               <height>28</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>COLLISION</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="7">
             <spacer name="horizontalSpacer_2">
              <property name="orientation">
               <enum>Qt::Horizontal</enum>
@@ -781,7 +803,7 @@
              </property>
             </spacer>
            </item>
-           <item row="0" column="7">
+           <item row="0" column="8">
             <widget class="QPushButton" name="clearLogButton">
              <property name="minimumSize">
               <size>
@@ -1123,6 +1145,16 @@
               </widget>
              </item>
              <item row="0" column="7">
+              <widget class="QCheckBox" name="historyCollisionCheckBox">
+               <property name="text">
+                <string>COLLISION</string>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="8">
               <widget class="QPushButton" name="selectAllLevelsButton">
                <property name="minimumSize">
                 <size>
@@ -1141,7 +1173,7 @@
                </property>
               </widget>
              </item>
-             <item row="0" column="8">
+             <item row="0" column="9">
               <widget class="QPushButton" name="deselectAllLevelsButton">
                <property name="minimumSize">
                 <size>
@@ -1160,7 +1192,7 @@
                </property>
               </widget>
              </item>
-             <item row="0" column="9">
+             <item row="0" column="10">
               <spacer name="horizontalSpacer">
                <property name="orientation">
                 <enum>Qt::Horizontal</enum>

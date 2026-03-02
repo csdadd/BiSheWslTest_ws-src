@@ -333,6 +333,7 @@ void MainWindow::connectSignals()
     connect(ui->errorCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
     connect(ui->fatalCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
     connect(ui->highFreqCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
+    connect(ui->collisionCheckBox, &QCheckBox::stateChanged, this, &MainWindow::onFilterChanged);
 
     // 连接日志按钮信号
     connect(ui->clearLogButton, &QPushButton::clicked, this, &MainWindow::onClearLogByLevel);
@@ -759,6 +760,7 @@ void MainWindow::refreshLogDisplay(bool autoScroll)
     if (ui->errorCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::ERROR);
     if (ui->fatalCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::FATAL);
     if (ui->highFreqCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::HIGHFREQ);
+    if (ui->collisionCheckBox->isChecked()) enabledLevels << static_cast<int>(LogLevel::COLLISION);
 
     // 使用LogFilterProxyModel的过滤功能，避免重建模型
     m_logFilterProxyModel->setLogLevelFilter(enabledLevels);
@@ -785,6 +787,7 @@ void MainWindow::onClearLogByLevel()
     if (ui->errorCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::ERROR);
     if (ui->fatalCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::FATAL);
     if (ui->highFreqCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::HIGHFREQ);
+    if (ui->collisionCheckBox->isChecked()) levelsToClear << static_cast<int>(LogLevel::COLLISION);
 
     // 从内存中清除对应级别的日志（仅影响显示，不影响数据库和文件中的日志）
     int clearedCount = 0;
@@ -1925,6 +1928,7 @@ QSet<int> MainWindow::getSelectedHistoryLogLevels() const
     if (ui->historyErrorCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::ERROR));
     if (ui->historyFatalCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::FATAL));
     if (ui->historyHighFreqCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::HIGHFREQ));
+    if (ui->historyCollisionCheckBox->isChecked()) levels.insert(static_cast<int>(LogLevel::COLLISION));
     return levels;
 }
 
@@ -1936,6 +1940,7 @@ LogLevel MainWindow::getMinLogLevel(const QSet<int>& levels) const
     if (levels.contains(static_cast<int>(LogLevel::ERROR))) return LogLevel::ERROR;
     if (levels.contains(static_cast<int>(LogLevel::FATAL))) return LogLevel::FATAL;
     if (levels.contains(static_cast<int>(LogLevel::HIGHFREQ))) return LogLevel::HIGHFREQ;
+    if (levels.contains(static_cast<int>(LogLevel::COLLISION))) return LogLevel::COLLISION;
     return LogLevel::INFO;
 }
 
@@ -2148,6 +2153,7 @@ void MainWindow::onSelectAllLevels()
     ui->historyErrorCheckBox->setChecked(true);
     ui->historyFatalCheckBox->setChecked(true);
     ui->historyHighFreqCheckBox->setChecked(true);
+    ui->historyCollisionCheckBox->setChecked(true);
 }
 
 void MainWindow::onDeselectAllLevels()
@@ -2158,6 +2164,7 @@ void MainWindow::onDeselectAllLevels()
     ui->historyErrorCheckBox->setChecked(false);
     ui->historyFatalCheckBox->setChecked(false);
     ui->historyHighFreqCheckBox->setChecked(false);
+    ui->historyCollisionCheckBox->setChecked(false);
 }
 
 void MainWindow::setParamSpinBoxColor(const QString& key, Nav2ParameterThread::ParamStatus status)
